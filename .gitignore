@@ -1,41 +1,51 @@
-# Compiled Lua sources
-luac.out
+# --- Secrets & credentials ---
+*.pem
+*.key
+*.p12
+id_rsa
+id_ed25519
+id_ecdsa
+*_rsa
+*_ed25519
+*.ppk
+.netrc
+.npmrc
+.pypirc
+.env
+.env.*
+*credentials*
+*token*
+*secret*
+.aws/credentials
+.ssh/known_hosts
 
-# luarocks build files
-*.src.rock
-*.zip
-*.tar.gz
+# --- Shell history (contains commands, sometimes secrets typed by mistake) ---
+.zsh_history
+.bash_history
+.zcompdump*
+.zsh_sessions/
 
-# Object files
-*.o
-*.os
-*.ko
-*.obj
-*.elf
+# --- Editor / IDE junk ---
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
 
-# Precompiled Headers
-*.gch
-*.pch
+# --- Nvim-specific runtime/cache (regenerated, don't need to track) ---
+nvim/.local/share/nvim/
+nvim/.local/state/nvim/
+nvim/.cache/nvim/
+undodir/
+*.undo
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-*.def
-*.exp
+# --- GPG ---
+*.gpg
+*.asc
+secring.*
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
+# --- Machine-specific configs you don't want synced blindly ---
+.zshrc.local
+.gitconfig.local
