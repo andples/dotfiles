@@ -11,6 +11,11 @@ moves anything in the way to `~/.dotfiles-backup/`, adds the shared config to `~
 Linux, and is safe to re-run. `./install.sh -n` shows what it would do; `./install.sh git zsh`
 installs just those packages.
 
+At the end it lists any missing tools (fzf, zoxide, eza, ...) with the install command for
+this OS (brew, pacman, apt, dnf, zypper). Without admin rights (e.g. uni) it suggests
+[mise](https://mise.jdx.dev), which installs into your home folder. It never installs anything
+itself, and a missing tool never makes it fail. Run just the check with `./install.sh --check`.
+
 ## Packages
 
 | Package | Goes to | Use on |

@@ -19,6 +19,8 @@ bash and zsh, on both macOS and Linux. Never add a helper to only one shell.
 - **macOS vs Linux tools differ** (BSD vs GNU): avoid `sed -i`, `date -d`, `stat -c`,
   `readlink -f`, `find -printf`, `grep -P`. Prefer flags both support.
 - Guard optional tools with `have <tool> && ...` so nothing errors on a bare machine.
+- A helper that needs a new tool: add it to `TOOLS` in `install.sh` (and `MISE_TOOLS` if
+  mise can install it, `pkg_name` if its package name differs) so `--check` reports it.
 - Don't redefine names Omarchy already uses (`c`, `n`, `t`, `cd`, `ff`, `g`, ...).
   The Mac-only `c`/`n`/`t` aliases in `zsh/.zshrc` are the one deliberate exception.
 
