@@ -23,7 +23,7 @@ itself, and a missing tool never makes it fail. Run just the check with `./insta
 | `zsh` | `~/.zshrc` | Mac |
 | `shell` | `~/.config/shell/shared.sh` | everywhere |
 | `bin` | `~/.local/bin/` (helper scripts like `recentdl`) | everywhere |
-| `git` | `~/.config/git/config` | everywhere |
+| `git` | `~/.config/git/dotfiles.gitconfig` (included from your own `~/.config/git/config`) | everywhere |
 | `starship` | `~/.config/starship.toml` (prompt: folder, git branch, status) | everywhere |
 | `nvim` | `~/.config/nvim` | everywhere |
 | `agents` | `~/.config/agents/AGENTS.md`, linked from Claude, Codex, opencode, pi | everywhere |

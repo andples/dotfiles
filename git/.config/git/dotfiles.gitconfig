@@ -1,5 +1,5 @@
-# Git behaviour settings. Identity (name/email) stays in ~/.gitconfig,
-# which git reads after this file.
+# Shared git behaviour settings. install.sh includes this from ~/.config/git/config,
+# so each machine keeps its own identity, credential helpers and aliases there.
 [init]
 	defaultBranch = main
 [push]

@@ -183,6 +183,21 @@ for pkg in "$@"; do
   done
 done
 
+# git reads the shared settings via an include, so the machine's own config (identity,
+# credential helpers) stays a real file. Older installs linked that file directly: undo that.
+gitcfg="$HOME/.config/git/config"
+case "$(readlink "$gitcfg" 2>/dev/null)" in
+  "$DOTFILES"/*)
+    echo "git: ~/.config/git/config was a link into dotfiles, removing it"
+    run rm "$gitcfg" ;;
+esac
+if [ -e "$HOME/.config/git/dotfiles.gitconfig" ] && ! grep -qs 'path = dotfiles.gitconfig' "$gitcfg"; then
+  echo "git: including dotfiles.gitconfig from ~/.config/git/config"
+  if [ -z "$DRY" ]; then
+    printf '\n[include]\n\tpath = dotfiles.gitconfig\n' >> "$gitcfg"
+  fi
+fi
+
 # bash loads the shared config with one line (Omarchy owns ~/.bashrc, so it isn't linked)
 if [ "$(uname)" != Darwin ] && ! grep -qs 'config/shell/shared.sh' "$HOME/.bashrc"; then
   echo "bash: adding shared.sh to ~/.bashrc"
