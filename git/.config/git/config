@@ -1,0 +1,20 @@
+# Git behaviour settings. Identity (name/email) stays in ~/.gitconfig,
+# which git reads after this file.
+[init]
+	defaultBranch = main
+[push]
+	autoSetupRemote = true
+[pull]
+	rebase = true
+[rebase]
+	autoStash = true
+[merge]
+	conflictstyle = zdiff3
+[diff]
+	algorithm = histogram
+[branch]
+	sort = -committerdate
+[rerere]
+	enabled = true
+[help]
+	autocorrect = prompt

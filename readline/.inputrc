@@ -1,0 +1,11 @@
+# For bash on machines without Omarchy (e.g. uni). Omarchy has its own.
+$include /etc/inputrc
+
+set completion-ignore-case on
+set mark-symlinked-directories on
+set colored-stats on
+set visible-stats on
+
+# Up/Down search history for commands starting with what you've typed
+"\e[A": history-search-backward
+"\e[B": history-search-forward
