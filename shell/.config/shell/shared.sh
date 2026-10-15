@@ -13,6 +13,8 @@ esac
 
 # --- Things Omarchy already sets up; only do them elsewhere ---
 if [ -z "$OMARCHY_PATH" ]; then
+  # mise: user-level tool installs (no admin needed), see install.sh
+  have mise && eval "$(mise activate $_sh)"
   have zoxide && eval "$(zoxide init $_sh)" && eval "$(zoxide init $_sh --cmd cd)"
   # fzf: Ctrl-R history, Ctrl-T insert file path, Alt-C cd into dir (needs fzf >= 0.48)
   have fzf && fzf --$_sh >/dev/null 2>&1 && eval "$(fzf --$_sh)"
@@ -28,9 +30,12 @@ if [ -z "$OMARCHY_PATH" ]; then
     alias lt='eza --tree --level=2 --long --icons --git'
   fi
 
+  # Debian/Ubuntu name bat "batcat"
+  have bat || { have batcat && alias bat='batcat'; }
+
   # fuzzy find a file with preview / open it in nvim
-  have bat && alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
-  have bat && alias eff='nvim "$(ff)"'
+  { have bat || have batcat; } && alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
+  { have bat || have batcat; } && alias eff='nvim "$(ff)"'
 
   alias g='git'
   alias gcm='git commit -m'

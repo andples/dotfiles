@@ -38,6 +38,8 @@ export NVM_DIR="$HOME/.nvm"
 # based on history / what completion would fill in. Accept with -> or End.
 # (keep this last)
 for f in /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
-         /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh; do
+         /usr/local/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+         /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh \
+         /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh; do
   [ -f "$f" ] && source "$f" && break
 done
