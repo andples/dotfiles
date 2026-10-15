@@ -34,10 +34,6 @@ id_ecdsa
 .vscode/*
 !.vscode/settings.json
 
-# --- Nvim-specific runtime/cache (regenerated, don't need to track) ---
-nvim/.local/share/nvim/
-nvim/.local/state/nvim/
-nvim/.cache/nvim/
 undodir/
 *.undo
 

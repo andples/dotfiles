@@ -147,8 +147,6 @@ fi
 
 if [ $# -eq 0 ]; then
   set -- shell bin git agents starship
-  # Omarchy ships its own nvim setup; install ours there only when asked (./install.sh nvim)
-  if [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ]; then set -- "$@" nvim; fi
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
 fi
@@ -180,6 +178,20 @@ for pkg in "$@"; do
     echo "  ~/$rel"
     run mkdir -p "$(dirname "$dest")"
     run ln -s "$src" "$dest"
+  done
+done
+
+# Remove links to files that are no longer in the repo (e.g. a package that was deleted)
+for dir in "$HOME/.config" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.codex" "$HOME/.pi"; do
+  [ -d "$dir" ] || continue
+  find "$dir" -type l 2>/dev/null | while IFS= read -r link; do
+    case "$(readlink "$link")" in
+      "$DOTFILES"/*)
+        if [ ! -e "$link" ]; then
+          echo "removing stale link ${link#"$HOME"/}"
+          run rm "$link"
+        fi ;;
+    esac
   done
 done
 
