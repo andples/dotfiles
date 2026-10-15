@@ -32,7 +32,10 @@ bash and zsh, on both macOS and Linux. Never add a helper to only one shell.
 
 ## Other rules
 
-- No secrets in this repo. They go in `~/.zshrc.local` / `~/.bashrc.local` (gitignored).
+- This repo is meant to be public. No secrets, usernames, hostnames or other personal details.
+  Per-machine things go outside the repo: `~/.config/shell/local.sh` (aliases, exports),
+  `~/.config/shell/secrets.sh` (keys, chmod 600), `~/.ssh/config` (hosts), the machine's own
+  `~/.config/git/config` (identity), or a project's `.envrc` (project secrets).
 - `install.sh` must stay POSIX `sh` with no dependencies, and safe to re-run.
 - New packages: add them to the README table and, if they belong on every machine, to the
   default list in `install.sh`.

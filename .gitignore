@@ -48,4 +48,6 @@ secring.*
 
 # --- Machine-specific configs you don't want synced blindly ---
 .zshrc.local
+local.sh
+secrets.sh
 .gitconfig.local
