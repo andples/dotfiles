@@ -146,7 +146,7 @@ if [ "$1" = --check ]; then
 fi
 
 if [ $# -eq 0 ]; then
-  set -- shell bin git nvim agents
+  set -- shell bin git nvim agents starship
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
 fi
