@@ -13,7 +13,6 @@ installs just those packages.
 
 ## Packages
 
-
 | Package | Goes to | Use on |
 |---|---|---|
 | `zsh` | `~/.zshrc` | Mac |
@@ -23,7 +22,7 @@ installs just those packages.
 | `agents` | `~/.config/agents/AGENTS.md`, linked from Claude, Codex, opencode, pi | everywhere |
 | `readline` | `~/.inputrc` | bash without Omarchy (uni) |
 
-Mac: `stow --no-folding zsh shell git nvim agents` (back up your existing `~/.zshrc` and agent files first; stow refuses to overwrite real files).
+Using stow instead: `stow --no-folding zsh shell git nvim agents` (stow refuses to overwrite real files, so move them out of the way first).
 
 `--no-folding` stops stow from replacing a whole directory like `~/.claude` with one symlink.
 
