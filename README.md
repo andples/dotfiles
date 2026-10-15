@@ -1,6 +1,18 @@
 # dotfiles
 
-Stow packages (run from this directory):
+## Install anywhere
+
+```sh
+git clone <this repo> ~/dotfiles && ~/dotfiles/install.sh
+```
+
+`install.sh` needs nothing but `sh`. It symlinks each file into `$HOME` (like `stow --no-folding`),
+moves anything in the way to `~/.dotfiles-backup/`, adds the shared config to `~/.bashrc` on
+Linux, and is safe to re-run. `./install.sh -n` shows what it would do; `./install.sh git zsh`
+installs just those packages.
+
+## Packages
+
 
 | Package | Goes to | Use on |
 |---|---|---|

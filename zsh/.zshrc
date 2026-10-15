@@ -88,4 +88,7 @@ recentdl() {
 # zsh-autosuggestions: shows a dim inline suggestion as you type,
 # based on history / what completion would fill in. Accept with -> or End.
 # (keep this last)
-source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+for f in /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+         /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh; do
+  [ -f "$f" ] && source "$f" && break
+done
