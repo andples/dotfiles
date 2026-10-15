@@ -147,6 +147,8 @@ fi
 
 if [ $# -eq 0 ]; then
   set -- shell bin git agents starship
+  # Omarchy ships its own LazyVim setup; only install the minimal nvim config elsewhere
+  if [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ]; then set -- "$@" nvim; fi
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
 fi
