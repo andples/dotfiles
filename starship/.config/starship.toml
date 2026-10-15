@@ -1,6 +1,11 @@
 add_newline = true
 command_timeout = 200
-format = "[$directory$git_branch$git_status]($style)$character"
+format = "${env_var.MACHINE_NAME}[$directory$git_branch$git_status]($style)$character"
+
+# Which computer this is (set in shared.sh: mac, oma, or the hostname)
+[env_var.MACHINE_NAME]
+format = "[$env_value]($style) "
+style = "bold purple"
 
 [character]
 error_symbol = "[✗](bold cyan)"

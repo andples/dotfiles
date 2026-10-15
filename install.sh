@@ -146,7 +146,9 @@ if [ "$1" = --check ]; then
 fi
 
 if [ $# -eq 0 ]; then
-  set -- shell bin git nvim agents starship
+  set -- shell bin git agents starship
+  # Omarchy ships its own nvim setup; install ours there only when asked (./install.sh nvim)
+  if [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ]; then set -- "$@" nvim; fi
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
 fi

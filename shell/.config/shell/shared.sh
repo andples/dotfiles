@@ -5,6 +5,20 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 if [ -n "$ZSH_VERSION" ]; then _sh=zsh; else _sh=bash; fi
 
+# Short machine name, shown at the start of the prompt.
+# Override with `export MACHINE_NAME=...` in ~/.zshrc.local or ~/.bashrc.
+if [ -z "$MACHINE_NAME" ]; then
+  if [ "$(uname)" = Darwin ]; then
+    MACHINE_NAME=mac
+  elif [ -n "$OMARCHY_PATH" ] || [ -d /usr/share/omarchy ]; then
+    MACHINE_NAME=oma
+  else
+    MACHINE_NAME=$(uname -n)
+    MACHINE_NAME=${MACHINE_NAME%%.*}
+  fi
+fi
+export MACHINE_NAME
+
 # helper scripts from the bin package
 case ":$PATH:" in
   *":$HOME/.local/bin:"*) ;;
@@ -18,7 +32,13 @@ if [ -z "$OMARCHY_PATH" ]; then
   have zoxide && eval "$(zoxide init $_sh)" && eval "$(zoxide init $_sh --cmd cd)"
   # fzf: Ctrl-R history, Ctrl-T insert file path, Alt-C cd into dir (needs fzf >= 0.48)
   have fzf && fzf --$_sh >/dev/null 2>&1 && eval "$(fzf --$_sh)"
-  have starship && eval "$(starship init $_sh)"
+  if have starship; then
+    eval "$(starship init $_sh)"
+  elif [ "$_sh" = zsh ]; then
+    PROMPT="%F{cyan}$MACHINE_NAME%f $PROMPT"
+  else
+    PS1="\[\e[36m\]$MACHINE_NAME\[\e[0m\] $PS1"
+  fi
 
   alias ..='cd ..'
   alias ...='cd ../..'
