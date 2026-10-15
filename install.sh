@@ -15,7 +15,7 @@ if [ "$1" = -n ]; then DRY=1; shift; fi
 run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 
 if [ $# -eq 0 ]; then
-  set -- shell git nvim agents
+  set -- shell bin git nvim agents
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
 fi

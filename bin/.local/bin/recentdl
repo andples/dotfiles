@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Move the most recent <count> items from ~/Downloads into the current directory.
+# Works on macOS (bash 3.2) and Linux.
+#
+#   recentdl       move the newest item
+#   recentdl 3     move the newest 3
+
+n="${1:-1}"
+case "$n" in
+  ''|*[!0-9]*|0) echo "usage: recentdl <count>" >&2; exit 1 ;;
+esac
+
+dl="$HOME/Downloads"
+dest="$PWD"
+
+if [ ! -d "$dl" ]; then
+  echo "recentdl: no Downloads dir at $dl" >&2
+  exit 1
+fi
+
+# Most recently modified entries first (files and dirs); ls -t skips dotfiles
+files=()
+while IFS= read -r name; do
+  files+=("$name")
+done < <(ls -t "$dl" | head -n "$n")
+
+if [ ${#files[@]} -eq 0 ]; then
+  echo "recentdl: nothing found in $dl"
+  exit 0
+fi
+
+echo "About to move to: $dest"
+echo "----------------------------------------"
+for f in "${files[@]}"; do
+  echo "  $f"
+done
+echo "----------------------------------------"
+
+read -r -n 1 -p "Proceed? [y/N] " reply
+echo
+if [ "$reply" != y ] && [ "$reply" != Y ]; then
+  echo "recentdl: aborted"
+  exit 1
+fi
+
+for f in "${files[@]}"; do
+  mv -i -- "$dl/$f" "$dest"/
+done
+
+echo "recentdl: moved ${#files[@]} item(s) to $dest"

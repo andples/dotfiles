@@ -17,6 +17,7 @@ installs just those packages.
 |---|---|---|
 | `zsh` | `~/.zshrc` | Mac |
 | `shell` | `~/.config/shell/shared.sh` | everywhere |
+| `bin` | `~/.local/bin/` (helper scripts like `recentdl`) | everywhere |
 | `git` | `~/.config/git/config` | everywhere |
 | `nvim` | `~/.config/nvim` | everywhere |
 | `agents` | `~/.config/agents/AGENTS.md`, linked from Claude, Codex, opencode, pi | everywhere |

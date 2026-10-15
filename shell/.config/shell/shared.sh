@@ -5,6 +5,12 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 if [ -n "$ZSH_VERSION" ]; then _sh=zsh; else _sh=bash; fi
 
+# helper scripts from the bin package
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
 # --- Things Omarchy already sets up; only do them elsewhere ---
 if [ -z "$OMARCHY_PATH" ]; then
   have zoxide && eval "$(zoxide init $_sh)" && eval "$(zoxide init $_sh --cmd cd)"
