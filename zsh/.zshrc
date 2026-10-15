@@ -18,9 +18,6 @@ bindkey '^[OB' down-line-or-beginning-search
 
 unsetopt BEEP # stop beep
 
-# Aliases, functions and tool setup shared with bash
-[ -f ~/.config/shell/shared.sh ] && source ~/.config/shell/shared.sh
-
 # Rebindings
 alias c='clear'
 alias n='nvim'
@@ -31,8 +28,9 @@ alias cc='cd ~/claude-scratch && claude'
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
 
-# Machine-specific settings and secrets (not in git)
-[ -f ~/.zshrc.local ] && source ~/.zshrc.local
+# Aliases, functions and tool setup shared with bash. It loads this machine's
+# private ~/.config/shell/local.sh and secrets.sh last, so they can override anything.
+[ -f ~/.config/shell/shared.sh ] && source ~/.config/shell/shared.sh
 
 # zsh-autosuggestions: shows a dim inline suggestion as you type,
 # based on history / what completion would fill in. Accept with -> or End.

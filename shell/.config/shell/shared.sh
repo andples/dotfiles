@@ -6,7 +6,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 if [ -n "$ZSH_VERSION" ]; then _sh=zsh; else _sh=bash; fi
 
 # Short machine name, shown at the start of the prompt.
-# Override with `export MACHINE_NAME=...` in ~/.zshrc.local or ~/.bashrc.
+# Override with `export MACHINE_NAME=...` in ~/.config/shell/local.sh.
 if [ -z "$MACHINE_NAME" ]; then
   if [ "$(uname)" = Darwin ]; then
     MACHINE_NAME=mac
@@ -167,3 +167,9 @@ gco() {
 
 # quick usage examples: cheat tar
 cheat() { curl -s "cheat.sh/$1"; }
+
+# --- This machine only (never in the repo) ---
+# local.sh: machine-specific aliases, functions, exports
+# secrets.sh: API keys etc. (chmod 600)
+[ -f ~/.config/shell/local.sh ] && . ~/.config/shell/local.sh
+[ -f ~/.config/shell/secrets.sh ] && . ~/.config/shell/secrets.sh
