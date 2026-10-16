@@ -140,6 +140,117 @@ check_deps() {
   return 0
 }
 
+# Zed has no way to include other settings files, and it rewrites settings.json itself, so
+# the zed package isn't linked: its snippets (zed/*.json) are merged into the machine's own
+# settings.json. Keys from the snippets win; everything else in the file is kept.
+merge_zed() {
+  dest="$HOME/.config/zed/settings.json"
+  base=$dest
+  if ! have python3; then
+    echo "  skipped: merging Zed settings needs python3"
+    return 0
+  fi
+  # Older installs linked the whole file: go back to a real file, starting from the
+  # settings that install backed up
+  case "$(readlink "$dest" 2>/dev/null)" in
+    "$DOTFILES"/*)
+      echo "  replacing the old link with a real file"
+      run rm "$dest"
+      base=$(ls -d "$HOME"/.dotfiles-backup/*/.config/zed/settings.json 2>/dev/null | tail -n 1)
+      [ -n "$base" ] && echo "  starting from ${base#"$HOME"/}" ;;
+  esac
+
+  tmp="${TMPDIR:-/tmp}/dotfiles-zed.$$"
+  set +e
+  python3 - "$base" "$tmp" "$DOTFILES"/zed/*.json <<'PY'
+import json, os, sys
+
+def strip_jsonc(text):
+    # Zed's settings are JSON plus comments and trailing commas
+    out, i, n, in_str = [], 0, len(text), False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\":
+                out.append(text[i + 1])
+                i += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+            out.append(c)
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        elif c == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1
+                continue
+            out.append(c)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+def load(path):
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        text = strip_jsonc(f.read())
+    return json.loads(text) if text.strip() else {}
+
+def merge(into, new):
+    for key, value in new.items():
+        if isinstance(value, dict) and isinstance(into.get(key), dict):
+            merge(into[key], value)
+        else:
+            into[key] = value
+
+base, tmp, snippets = sys.argv[1], sys.argv[2], sys.argv[3:]
+path = base
+try:
+    current = load(base)
+    merged = json.loads(json.dumps(current))
+    for path in snippets:
+        merge(merged, load(path))
+except ValueError as e:
+    print("  couldn't read %s: %s" % (path, e))
+    sys.exit(1)
+with open(tmp, "w") as f:
+    json.dump(merged, f, indent=2)
+    f.write("\n")
+sys.exit(0 if merged != current else 3)
+PY
+  status=$?
+  set -e
+  # restoring from a backup always needs writing, even if the snippets add nothing new
+  [ "$status" = 3 ] && [ "$base" != "$dest" ] && status=0
+
+  case $status in
+    0)
+      if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+        echo "  backing up ~/.config/zed/settings.json (comments in it aren't kept)"
+        run mkdir -p "$BACKUP/.config/zed"
+        run cp "$dest" "$BACKUP/.config/zed/settings.json"
+      fi
+      echo "  merging $(cd "$DOTFILES/zed" && echo *.json) into ~/.config/zed/settings.json"
+      run mkdir -p "$(dirname "$dest")"
+      run cp "$tmp" "$dest" ;;
+    3) echo "  ~/.config/zed/settings.json already up to date" ;;
+    *) echo "  left ~/.config/zed/settings.json alone" ;;
+  esac
+  rm -f "$tmp"
+}
+
 if [ "$1" = --check ]; then
   check_deps
   exit 0
@@ -151,6 +262,8 @@ if [ $# -eq 0 ]; then
   if [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ]; then set -- "$@" nvim; fi
   [ "$(uname)" = Darwin ] && set -- "$@" zsh
   [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
+  # Zed creates this folder on first launch
+  [ -d "$HOME/.config/zed" ] && set -- "$@" zed
 fi
 
 for pkg in "$@"; do
@@ -159,6 +272,7 @@ for pkg in "$@"; do
     exit 1
   fi
   echo "$pkg"
+  if [ "$pkg" = zed ]; then merge_zed; continue; fi
   (cd "$DOTFILES/$pkg" && find . -mindepth 1 \( -type f -o -type l \) | sed 's#^\./##') |
   while IFS= read -r rel; do
     src="$DOTFILES/$pkg/$rel"

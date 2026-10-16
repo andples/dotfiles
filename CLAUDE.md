@@ -37,5 +37,7 @@ bash and zsh, on both macOS and Linux. Never add a helper to only one shell.
   `~/.config/shell/secrets.sh` (keys, chmod 600), `~/.ssh/config` (hosts), the machine's own
   `~/.config/git/config` (identity), or a project's `.envrc` (project secrets).
 - `install.sh` must stay POSIX `sh` with no dependencies, and safe to re-run.
+- `zed` is the one package that isn't linked: `install.sh` merges `zed/*.json` into the
+  machine's own `~/.config/zed/settings.json`. Add Zed settings as a new snippet file.
 - New packages: add them to the README table and, if they belong on every machine, to the
   default list in `install.sh`.
