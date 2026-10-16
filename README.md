@@ -33,6 +33,7 @@ itself, and a missing tool never makes it fail.
 | `agents` | `~/.config/agents/AGENTS.md`, linked from Claude Code, Codex, opencode and pi | everywhere |
 | `zsh` | `~/.zshrc` | macOS |
 | `nvim` | `~/.config/nvim/init.lua`: minimal, no plugins, for quick edits | not Omarchy (it has LazyVim) |
+| `zed` | `~/.config/zed/settings.json`: Zed editor settings (OCaml set up) | opt-in: `./install.sh zed` |
 | `readline` | `~/.inputrc` | bash without Omarchy |
 
 On Linux, `install.sh` adds one line to `~/.bashrc` that loads `shared.sh`, rather than

@@ -1,0 +1,35 @@
+// Zed settings: https://zed.dev/docs/configuring-zed
+// Zed also writes here when you change settings in its UI, so check `git diff` now and then.
+{
+  // OCaml: syntax + ocamllsp (installed with `opam install ocaml-lsp-server ocamlformat`).
+  // Zed starts language servers with your login shell's PATH, so the opam setup in
+  // shared.sh is what lets it find ocamllsp.
+  "auto_install_extensions": {
+    "ocaml": true
+  },
+  "languages": {
+    "OCaml": {
+      "tab_size": 2,
+      // ocamlformat via ocamllsp; only formats projects with a .ocamlformat file
+      "format_on_save": "on",
+      // inferred types shown inline, handy while learning
+      "inlay_hints": {
+        "enabled": true
+      }
+    },
+    "OCaml Interface": {
+      "tab_size": 2,
+      "format_on_save": "on"
+    }
+  },
+  "lsp": {
+    "ocamllsp": {
+      "settings": {
+        "inlayHints": {
+          "hintLetBindings": true,
+          "hintPatternVariables": true
+        }
+      }
+    }
+  }
+}

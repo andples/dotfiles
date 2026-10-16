@@ -25,6 +25,10 @@ case ":$PATH:" in
   *) export PATH="$HOME/.local/bin:$PATH" ;;
 esac
 
+# OCaml: opam's environment (PATH to ocaml, dune, ocamllsp). Run `opam init --no-setup`
+# so opam doesn't append this to the linked rc files itself.
+[ -r "$HOME/.opam/opam-init/variables.sh" ] && . "$HOME/.opam/opam-init/variables.sh"
+
 # --- Things Omarchy already sets up; only do them elsewhere ---
 if [ -z "$OMARCHY_PATH" ]; then
   # mise: user-level tool installs (no admin needed), see install.sh
