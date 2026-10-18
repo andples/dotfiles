@@ -21,13 +21,15 @@ run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Tools the configs use. Everything works without them, minus that feature.
-TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3"
+TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard"
 # Tools mise can install into $HOME without admin rights
 MISE_TOOLS="nvim fzf zoxide eza bat starship direnv uv"
 
 installed() {
   case $1 in
     bat) have bat || have batcat ;;
+    # for `pb`: pbcopy ships with macOS
+    clipboard) have pbcopy || have wl-copy || have xclip || have xsel ;;
     zsh-autosuggestions)
       for f in /opt/homebrew/share /usr/local/share /usr/share/zsh/plugins /usr/share; do
         [ -f "$f/zsh-autosuggestions/zsh-autosuggestions.zsh" ] && return 0
@@ -43,6 +45,7 @@ pkg_name() {
     nvim:*)                  echo neovim ;;
     python3:brew|python3:pacman) echo python ;;
     starship:apt|uv:apt|uv:zypper) ;;
+    clipboard:*)             if [ -n "$WAYLAND_DISPLAY" ]; then echo wl-clipboard; else echo xclip; fi ;;
     *)                       echo "$1" ;;
   esac
 }

@@ -116,6 +116,16 @@ uve() {
   direnv allow
 }
 
+# copy stdin to the clipboard: echo hi | pb
+pb() {
+  if have pbcopy; then pbcopy
+  elif [ -n "$WAYLAND_DISPLAY" ] && have wl-copy; then wl-copy
+  elif have xclip; then xclip -selection clipboard
+  elif have xsel; then xsel --clipboard --input
+  else echo "pb: no clipboard tool found (install wl-clipboard or xclip)" >&2; return 1
+  fi
+}
+
 mkcd() { mkdir -p -- "$1" && builtin cd -- "$1"; }
 
 # print PATH one entry per line
