@@ -1,0 +1,33 @@
+// LaTeX: texlab (downloaded by the latex extension) runs latexmk on every save, then
+// moves the PDF viewer to the cursor line (via `pdfview`: Skim on macOS, Zathura on Linux).
+// Needs a TeX distribution with latexmk (MacTeX / texlive).
+{
+  "auto_install_extensions": { "latex": true },
+  "languages": {
+    "LaTeX": {
+      "tab_size": 2,
+      "soft_wrap": "editor_width",
+      // latexindent is slow and rewrites too much; the build-on-save below is what matters
+      "format_on_save": "off"
+    }
+  },
+  "lsp": {
+    "texlab": {
+      "settings": {
+        "texlab": {
+          "build": {
+            "onSave": true,
+            "forwardSearchAfter": true,
+            "executable": "latexmk",
+            "args": ["-pdf", "-interaction=nonstopmode", "-synctex=1", "-file-line-error", "%f"]
+          },
+          "forwardSearch": {
+            "executable": "pdfview",
+            "args": ["%p", "%l", "%f"]
+          },
+          "chktex": { "onOpenAndSave": true, "onEdit": false }
+        }
+      }
+    }
+  }
+}

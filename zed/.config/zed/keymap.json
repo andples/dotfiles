@@ -1,0 +1,106 @@
+// Leader key = space. Everything else is Zed's defaults.
+// The general keys work in a file (vim normal mode), with no file open, and in the file tree.
+// Zed's keymap can't share a list, so they're repeated per context below.
+[
+  // ── In a file (vim normal mode) ──────────────────────────────────
+  {
+    "context": "Editor && vim_mode == normal && !menu",
+    "bindings": {
+      // find / navigate
+      "space f": "file_finder::Toggle",
+      "space /": "pane::DeploySearch",
+      "space e": "project_panel::ToggleFocus",
+      "space d": "diagnostics::Deploy",
+      "space j": "terminal_panel::ToggleFocus",
+
+      // code
+      "space a": "editor::ToggleCodeActions",
+      "space c": "editor::Rename",
+      "space F": "editor::Format",
+
+      // tasks
+      "space r": "task::Rerun",
+      "space R": "task::Spawn",
+      "space t": "editor::SpawnNearestTask",
+
+      // projects
+      "space o": "projects::OpenRecent",
+      "space O": "workspace::Open",
+      "space z": ["task::Spawn", { "task_name": "Open project" }],
+
+      // help: cheat sheet of these keys (all of Zed's: cmd-k cmd-s)
+      "space ?": ["task::Spawn", { "task_name": "Show my keys" }],
+
+      // git (]c / [c move between changes)
+      "space g g": "git_panel::ToggleFocus",
+      "space g s": "git::ToggleStaged",
+      "space g S": "git::StageFile",
+      "space g r": "git::Restore",
+      "space g d": "editor::ToggleSelectedDiffHunks",
+      "space g D": "git::Diff",
+      "space g c": "git::Commit",
+      "space g p": "git::Push",
+      "space g P": "git::Pull",
+      "space g f": "git::Fetch",
+      "space g b": "git::Branch",
+      "space g l": "editor::ToggleGitBlameInline",
+      "space g B": "git::Blame",
+      "space g h": "git::FileHistory"
+    }
+  },
+
+  // ── No file open, and the file tree ────────────────────────────────
+  {
+    "context": "EmptyPane || SharedScreen || (ProjectPanel && not_editing)",
+    "bindings": {
+      "space f": "file_finder::Toggle",
+      "space /": "pane::DeploySearch",
+      "space e": "project_panel::ToggleFocus",
+      "space d": "diagnostics::Deploy",
+      "space j": "terminal_panel::ToggleFocus",
+      "space r": "task::Rerun",
+      "space R": "task::Spawn",
+      "space o": "projects::OpenRecent",
+      "space O": "workspace::Open",
+      "space z": ["task::Spawn", { "task_name": "Open project" }],
+      "space ?": ["task::Spawn", { "task_name": "Show my keys" }],
+      "space g g": "git_panel::ToggleFocus",
+      "space g D": "git::Diff",
+      "space g c": "git::Commit",
+      "space g p": "git::Push",
+      "space g P": "git::Pull",
+      "space g f": "git::Fetch",
+      "space g b": "git::Branch"
+    }
+  },
+
+  // ── Preview: Markdown in the Peek popup (space P: Zed's own preview beside it),
+  //    or the PDF (LaTeX jumps to the cursor) ──
+  {
+    "context": "Editor && vim_mode == normal && !menu && extension == md",
+    "bindings": {
+      "space p": ["task::Spawn", { "task_name": "Peek" }],
+      "space P": "markdown::OpenPreviewToTheSide"
+    }
+  },
+  {
+    "context": "Editor && vim_mode == normal && !menu && (extension == tex || extension == typ)",
+    "bindings": { "space p": ["task::Spawn", { "task_name": "View PDF" }] }
+  },
+
+  // ── From any mode ──────────────────────────────────────────────────
+  {
+    "context": "Editor && extension == md",
+    "bindings": { "cmd-alt-p": ["task::Spawn", { "task_name": "Peek" }] }
+  },
+  {
+    "context": "Editor && (extension == tex || extension == typ)",
+    "bindings": { "cmd-alt-p": ["task::Spawn", { "task_name": "View PDF" }] }
+  },
+  {
+    "bindings": {
+      "cmd-alt-o": "projects::OpenRecent",
+      "cmd-alt-g": "git_panel::ToggleFocus"
+    }
+  }
+]

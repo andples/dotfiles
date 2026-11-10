@@ -1,0 +1,19 @@
+// General editor behaviour: vim, inlay hints, format on save, no AI/telemetry.
+{
+  "vim_mode": true,
+  "relative_line_numbers": "enabled",
+  "vertical_scroll_margin": 5,
+  "cursor_blink": false,
+  "show_whitespaces": "selection",
+  "indent_guides": { "enabled": true, "coloring": "indent_aware" },
+  "inlay_hints": { "enabled": true, "show_background": false },
+  "autosave": "on_focus_change",
+  "format_on_save": "on",
+  "remove_trailing_whitespace_on_save": true,
+  "ensure_final_newline_on_save": true,
+  "collaboration_panel": { "button": false },
+  "terminal": { "dock": "bottom" },
+  "disable_ai": true,
+  "telemetry": { "diagnostics": false, "metrics": false },
+  "auto_install_extensions": { "toml": true }
+}

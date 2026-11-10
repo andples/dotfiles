@@ -1,0 +1,114 @@
+// Global Zed tasks. `space R` picks one, `space r` re-runs the last one.
+// Rust/Python tests and `fn main` also get ▶ buttons in the gutter (`space t` runs the one at the cursor).
+[
+  // ── PDF (LaTeX / Typst) ───────────────────────────────────────
+  {
+    "label": "View PDF",
+    "command": "pdfview \"$ZED_DIRNAME/$ZED_STEM.pdf\" \"$ZED_ROW\" \"$ZED_FILE\"",
+    "reveal": "never",
+    "hide": "on_success",
+    "allow_concurrent_runs": true
+  },
+  {
+    "label": "LaTeX: build",
+    "command": "latexmk -pdf -interaction=nonstopmode -synctex=1 -file-line-error \"$ZED_FILE\"",
+    "cwd": "$ZED_DIRNAME",
+    "hide": "on_success"
+  },
+  {
+    "label": "LaTeX: clean aux files",
+    "command": "latexmk -c \"$ZED_FILE\"",
+    "cwd": "$ZED_DIRNAME",
+    "hide": "on_success"
+  },
+  {
+    "label": "Typst: live preview in browser (click to jump)",
+    "command": "tinymist preview \"$ZED_FILE\"",
+    "reveal": "no_focus"
+  },
+
+  // ── Projects ──────────────────────────────────────────────────
+  // the `pick-dir` picker (same as `proj` in the shell), shown in the main area like a popup;
+  // the pick opens in Zed
+  {
+    "label": "Open project",
+    "command": "d=$(pick-dir) || exit 0; zoxide add \"$d\" 2>/dev/null; if command -v zed >/dev/null; then zed \"$d\"; else open -a Zed \"$d\"; fi",
+    "use_new_terminal": true,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "always"
+  },
+
+  // Markdown, formatted, in the Peek popup (space p). Without Peek: the system's Markdown app.
+  {
+    "label": "Peek",
+    "command": "peek \"$ZED_FILE\"",
+    "reveal": "never",
+    "hide": "always",
+    "allow_concurrent_runs": true
+  },
+
+  // cheat sheet of the keys and tasks in this config (space ?): in Peek, else as a Zed tab
+  {
+    "label": "Show my keys",
+    "command": "f=$(zed-keys) || exit 1; if peek --check; then peek \"$f\"; elif command -v zed >/dev/null; then zed -a \"$f\"; elif [ -x /Applications/Zed.app/Contents/MacOS/cli ]; then /Applications/Zed.app/Contents/MacOS/cli -a \"$f\"; else zeditor -a \"$f\"; fi",
+    "reveal": "never",
+    "hide": "always"
+  },
+
+  // Project tasks run from the current file's folder, so they find the nearest
+  // pyproject.toml / dune-project / Cargo.toml even with several projects in one repo.
+
+  // ── Python ────────────────────────────────────────────────────
+  {
+    "label": "Python: run file",
+    "command": "uv run \"$ZED_FILE\"",
+    "cwd": "$ZED_DIRNAME"
+  },
+  {
+    "label": "Python: pytest",
+    "command": "d=$ZED_DIRNAME; while [ \"$d\" != / ] && [ ! -f \"$d/pyproject.toml\" ]; do d=$(dirname \"$d\"); done; [ \"$d\" = / ] && d=$ZED_DIRNAME; cd \"$d\" && uv run pytest",
+    "cwd": "$ZED_DIRNAME"
+  },
+
+  // ── OCaml ─────────────────────────────────────────────────────
+  {
+    "label": "OCaml: dune build --watch",
+    "command": "dune build --watch",
+    "cwd": "$ZED_DIRNAME",
+    "reveal": "no_focus"
+  },
+  {
+    "label": "OCaml: dune test",
+    "command": "dune test",
+    "cwd": "$ZED_DIRNAME"
+  },
+  {
+    "label": "OCaml: run file as script",
+    "command": "ocaml \"$ZED_FILE\""
+  },
+
+  // ── Rust ──────────────────────────────────────────────────────
+  {
+    "label": "Rust: cargo run",
+    "command": "cargo run",
+    "cwd": "$ZED_DIRNAME"
+  },
+  {
+    "label": "Rust: cargo test",
+    "command": "cargo test",
+    "cwd": "$ZED_DIRNAME"
+  },
+
+  // ── C++ ───────────────────────────────────────────────────────
+  {
+    "label": "C++: compile & run file",
+    "command": "c++ -std=c++23 -g -Wall -Wextra -fsanitize=address,undefined \"$ZED_FILE\" -o \"${TMPDIR:-/tmp}/$ZED_STEM\" && \"${TMPDIR:-/tmp}/$ZED_STEM\"",
+    "cwd": "$ZED_DIRNAME"
+  },
+  {
+    "label": "C++: cmake build",
+    "command": "d=$ZED_DIRNAME; while [ \"$d\" != / ] && [ ! -f \"$d/CMakeLists.txt\" ]; do d=$(dirname \"$d\"); done; [ \"$d\" = / ] && d=$ZED_DIRNAME; cd \"$d\" && cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake --build build",
+    "cwd": "$ZED_DIRNAME"
+  }
+]

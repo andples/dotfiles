@@ -92,6 +92,29 @@ nf() {
   f=$(nvim --headless -c 'lua io.write(table.concat(vim.v.oldfiles, "\n"))' -c q 2>/dev/null | fzf) && nvim "$f"
 }
 
+# open a folder in Zed (its CLI is `zed`, `zeditor` on Arch, and not installed by default on macOS)
+zedo() {
+  if have zed; then zed "${1:-.}"
+  elif have zeditor; then zeditor "${1:-.}"
+  elif [ "$(uname)" = Darwin ]; then open -a Zed "${1:-.}"
+  else echo "zedo: Zed's CLI isn't installed" >&2; return 1
+  fi
+}
+
+# fuzzy-pick a folder: most visited first, then every git repo; type ~/ or / to browse
+# (Tab goes into a folder). Enter: cd into it. Ctrl-O: cd and open in Zed.
+# `proj foo` starts with "foo" typed. See the `pick-dir` and `projects` scripts.
+proj() {
+  local out key d
+  out=$(pick-dir --query="$*" --expect=ctrl-o) || return
+  key=$(printf '%s\n' "$out" | head -n 1)
+  d=$(printf '%s\n' "$out" | tail -n 1)
+  builtin cd -- "$d" || return
+  have zoxide && zoxide add "$d"
+  [ "$key" = ctrl-o ] && zedo .
+  return 0
+}
+
 # activate the venv in the current directory
 venv() {
   local d

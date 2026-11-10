@@ -1,0 +1,16 @@
+// Python: ty for types, ruff for lint + format (imports sorted on save).
+// Other Python servers are switched off so diagnostics don't show up twice.
+// Neither needs installing: Zed downloads both.
+{
+  "languages": {
+    "Python": {
+      // no inline ": Unknown" type labels; ty still flags real errors (typos, bad calls)
+      "inlay_hints": { "enabled": false },
+      "language_servers": ["ty", "ruff", "!basedpyright", "!pyright", "!pylsp", "!pyrefly", "..."],
+      "formatter": [
+        { "code_action": "source.organizeImports.ruff" },
+        { "language_server": { "name": "ruff" } }
+      ]
+    }
+  }
+}

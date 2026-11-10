@@ -1,0 +1,5 @@
+// Opening folders: Zed's own fuzzy path prompt instead of the macOS file dialog.
+{
+  "use_system_path_prompts": false,
+  "restore_on_startup": "last_session"
+}

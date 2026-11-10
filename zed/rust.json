@@ -1,0 +1,14 @@
+// Rust: rust-analyzer (from rustup, or downloaded by Zed) with clippy as the on-save check.
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "check": { "command": "clippy" },
+        "inlayHints": {
+          "closureReturnTypeHints": { "enable": "with_block" },
+          "lifetimeElisionHints": { "enable": "skip_trivial" }
+        }
+      }
+    }
+  }
+}

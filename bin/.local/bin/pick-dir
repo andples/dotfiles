@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Fuzzy-pick a folder and print its full path.
+#
+# Starts with the folders you visit most (zoxide), then every git repo (`projects`).
+# Type a path (starting with ~ / or .) to browse instead: the list becomes that folder's
+# subfolders and updates as you type.
+#
+#   Tab        complete the highlighted folder into the query (to go inside it)
+#   Enter      pick the highlighted folder, or the typed path if nothing matches
+#   Esc        cancel (exit 130)
+#
+# Extra arguments go to fzf, e.g. `pick-dir --expect=ctrl-o` (prints the key on line 1).
+# Used by `proj` in the shell and Zed's "Open project" task.
+
+home_to_tilde() { sed "s#^$HOME#~#"; }
+
+# subfolders for a typed path: "~/Doc" lists ~/*, "~/Documents/" lists ~/Documents/*
+list_path() {
+  local q=$1 dir
+  case $q in "~"*) q="$HOME${q#"~"}" ;; esac
+  case $q in
+    */) dir=${q%/} ;;
+    *) dir=$(dirname "$q") ;;
+  esac
+  [ -z "$dir" ] && dir=/
+  [ -d "$dir" ] || exit 0
+  # trailing / on everything, so after Tab the folder itself is the best match for "dir/"
+  echo "${dir%/}/"
+  find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name .git 2>/dev/null | sort | sed 's#$#/#'
+}
+
+list_start() {
+  {
+    command -v zoxide >/dev/null 2>&1 && zoxide query -l 2>/dev/null
+    command -v projects >/dev/null 2>&1 && projects | sed "s#^~#$HOME#"
+  } | awk 'NF && !seen[$0]++'
+}
+
+case $1 in
+  # run by fzf on every keystroke: a path query browses, anything else filters the
+  # (cached) start list. Only reloads when it has to, so typing a name stays instant.
+  --on-change)
+    q=$FZF_QUERY cache=$2
+    case $q in
+      "~"* | /* | .*)
+        # {q}: fzf inserts the query safely quoted
+        printf "change-prompt(path> )+reload('%s' --list-path {q})" "$0" ;;
+      *)
+        [ "$FZF_PROMPT" = "path> " ] && printf "change-prompt(folder> )+reload(cat '%s')" "$cache" ;;
+    esac
+    exit 0 ;;
+  --list-path)
+    list_path "$2" | home_to_tilde
+    exit 0 ;;
+esac
+
+self=$(command -v pick-dir || echo "$0")
+cache=$(mktemp "${TMPDIR:-/tmp}/pick-dir.XXXXXX")
+trap 'rm -f "$cache"' EXIT
+list_start | home_to_tilde > "$cache"
+out=$(fzf < "$cache" \
+  --scheme=path --tiebreak=length,index --prompt='folder> ' \
+  --header='type ~/ or / to browse · tab: go into · enter: pick' \
+  --bind "change:transform('$self' --on-change '$cache')" \
+  --bind 'tab:transform-query(p={}; case $p in */) printf %s "$p" ;; *) printf %s/ "$p" ;; esac)' \
+  --bind 'enter:accept-or-print-query' \
+  --preview='d={}; d="$HOME${d#"~"}"; git -C "$d" log --oneline --color=always -8 2>/dev/null; echo; ls "$d"' \
+  --preview-window='right,45%' \
+  "$@") || exit $?
+
+# with --expect, line 1 is the key; the path is the last line
+key=
+if [ "$(printf '%s\n' "$out" | wc -l)" -gt 1 ]; then key=$(printf '%s\n' "$out" | head -n 1); fi
+d=$(printf '%s\n' "$out" | tail -n 1)
+case $d in "~"*) d="$HOME${d#"~"}" ;; esac
+d=${d%/}
+[ -z "$d" ] && d=/
+if [ ! -d "$d" ]; then
+  echo "pick-dir: not a folder: $d" >&2
+  exit 1
+fi
+d=$(cd "$d" && pwd)
+[ -n "$key" ] && echo "$key"
+echo "$d"

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Open a PDF in a viewer that reloads on change, optionally jumping to a source line (SyncTeX).
+#
+#   pdfview paper.pdf                  open it
+#   pdfview paper.pdf 42 paper.tex     open it at the spot matching line 42 of paper.tex
+#
+# macOS: Skim (falls back to Preview, without the jump). Linux: Zathura, else xdg-open.
+# Used by the Zed config (texlab forward search and the "View PDF" task).
+set -e
+
+pdf=$1 line=$2 src=$3
+if [ -z "$pdf" ]; then
+  echo "usage: pdfview FILE.pdf [LINE SOURCE]" >&2
+  exit 2
+fi
+if [ ! -f "$pdf" ]; then
+  echo "pdfview: $pdf doesn't exist yet (save the source to build it)" >&2
+  exit 1
+fi
+
+if [ "$(uname)" = Darwin ]; then
+  displayline=/Applications/Skim.app/Contents/SharedSupport/displayline
+  if [ -x "$displayline" ]; then
+    # -r: reload, -g: stay in the background so the editor keeps focus
+    if [ -n "$line" ] && [ -n "$src" ]; then
+      exec "$displayline" -r -g "$line" "$pdf" "$src"
+    fi
+    exec open -g -a Skim "$pdf"
+  fi
+  exec open "$pdf"
+fi
+
+if command -v zathura >/dev/null 2>&1; then
+  # Ctrl-click in Zathura jumps back to the source in Zed
+  args=(--synctex-editor-command 'zed %{input}:%{line}')
+  if [ -n "$line" ] && [ -n "$src" ]; then
+    args+=(--synctex-forward "$line:1:$src")
+  fi
+  nohup zathura "${args[@]}" "$pdf" >/dev/null 2>&1 &
+  exit 0
+fi
+nohup xdg-open "$pdf" >/dev/null 2>&1 &

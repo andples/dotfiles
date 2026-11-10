@@ -1,0 +1,3 @@
+[submodule "zed-playground"]
+	path = zed-playground
+	url = https://github.com/andples/zed-playground.git

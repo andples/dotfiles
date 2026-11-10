@@ -1,0 +1,17 @@
+// Typst: tinymist (downloaded by the typst extension) writes the PDF next to the source
+// on every save and formats with typstyle. `space p` opens the PDF, which then reloads itself.
+{
+  "auto_install_extensions": { "typst": true },
+  "languages": {
+    "Typst": { "tab_size": 2, "soft_wrap": "editor_width" }
+  },
+  "lsp": {
+    "tinymist": {
+      "settings": {
+        "exportPdf": "onSave",
+        "formatterMode": "typstyle",
+        "formatterPrintWidth": 100
+      }
+    }
+  }
+}

@@ -6,9 +6,10 @@
 #   ./install.sh zsh git       only these packages
 #   ./install.sh -n ...        dry run: show what would happen
 #   ./install.sh --check       only check for missing tools
+#   ./install.sh peek          macOS: download, build and install the Peek app (optional)
 #
 # After linking it checks for missing tools and prints how to install them for this OS.
-# It never installs anything itself, and missing tools never make it fail.
+# It never installs tools itself (only Peek, when asked), and missing tools never make it fail.
 set -e
 
 DOTFILES=$(cd "$(dirname "$0")" && pwd)
@@ -254,6 +255,47 @@ PY
   rm -f "$tmp"
 }
 
+# Peek, the Markdown viewer the Zed config pops up (github.com/andples/peek, private).
+# Not a package of this repo: it's cloned to $PEEK_SRC (default ~/.local/src/peek), or
+# updated if it's already there, then built into /Applications. macOS only.
+PEEK_REPO=${PEEK_REPO:-git@github.com:andples/peek.git}
+PEEK_SRC=${PEEK_SRC:-$HOME/.local/src/peek}
+install_peek() {
+  echo "peek"
+  if [ "$(uname)" != Darwin ]; then
+    echo "  skipped: Peek is a macOS app (the \`peek\` command falls back to xdg-open)"
+    return 0
+  fi
+  if ! have git || ! have swift; then
+    echo "  skipped: building Peek needs git and Swift (xcode-select --install)"
+    return 0
+  fi
+  if [ -d "$PEEK_SRC/.git" ]; then
+    echo "  updating ${PEEK_SRC#"$HOME"/}"
+    run git -C "$PEEK_SRC" pull --ff-only -q || echo "  couldn't update it, building what's there"
+  else
+    echo "  cloning $PEEK_REPO into ${PEEK_SRC#"$HOME"/}"
+    run mkdir -p "$(dirname "$PEEK_SRC")"
+    if ! run git clone -q "$PEEK_REPO" "$PEEK_SRC"; then
+      echo "  skipped: couldn't clone it (the repo is private: needs your GitHub ssh key)"
+      return 0
+    fi
+  fi
+  echo "  building (a minute the first time)"
+  if [ -n "$DRY" ]; then
+    echo "  would: $PEEK_SRC/scripts/build-app.sh --install"
+  elif ! "$PEEK_SRC/scripts/build-app.sh" --install >/dev/null; then
+    echo "  build failed: run $PEEK_SRC/scripts/build-app.sh to see why"
+  else
+    echo "  installed Peek.app"
+  fi
+  return 0
+}
+
+peek_installed() {
+  [ -d /Applications/Peek.app ] || [ -d "$HOME/Applications/Peek.app" ]
+}
+
 if [ "$1" = --check ]; then
   check_deps
   exit 0
@@ -270,16 +312,26 @@ if [ $# -eq 0 ]; then
 fi
 
 for pkg in "$@"; do
+  if [ "$pkg" = peek ]; then
+    install_peek
+    continue
+  fi
   if [ ! -d "$DOTFILES/$pkg" ]; then
     echo "no such package: $pkg" >&2
     exit 1
   fi
   echo "$pkg"
-  if [ "$pkg" = zed ]; then merge_zed; continue; fi
+  [ "$pkg" = zed ] && merge_zed
   (cd "$DOTFILES/$pkg" && find . -mindepth 1 \( -type f -o -type l \) | sed 's#^\./##') |
   while IFS= read -r rel; do
     src="$DOTFILES/$pkg/$rel"
     dest="$HOME/$rel"
+
+    # zed: the top-level snippets were merged above; only files under .config/ are linked
+    case "$pkg/$rel" in
+      zed/.config/*) ;;
+      zed/*) continue ;;
+    esac
 
     # agent tools: only link into tools that are installed here
     case "$pkg/$rel" in
@@ -339,4 +391,8 @@ fi
 
 [ -d "$BACKUP" ] && echo "old files saved in $BACKUP"
 check_deps || true
+if [ "$(uname)" = Darwin ] && ! peek_installed; then
+  echo
+  echo "Optional: Peek, the Markdown viewer behind Zed's space p: ./install.sh peek"
+fi
 exit 0

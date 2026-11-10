@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Show a Markdown file formatted, in the Peek popup (macOS, github.com/andples/peek, private).
+#   peek notes.md        pop it up
+#   peek --check         exit 0 if Peek is installed
+# Without Peek: the system's default app for the file.
+peek_app() {
+  [ "$(uname)" = Darwin ] || return 1
+  [ -d /Applications/Peek.app ] || [ -d "$HOME/Applications/Peek.app" ]
+}
+
+if [ "$1" = --check ]; then
+  peek_app
+  exit
+fi
+if [ $# -eq 0 ]; then
+  echo "usage: peek FILE.md" >&2
+  exit 2
+fi
+if peek_app; then
+  exec open -a Peek "$@"
+elif [ "$(uname)" = Darwin ]; then
+  exec open "$@"
+elif command -v xdg-open >/dev/null 2>&1; then
+  for f in "$@"; do xdg-open "$f" >/dev/null 2>&1 & done
+else
+  echo "peek: Peek isn't installed and there's no xdg-open" >&2
+  exit 1
+fi

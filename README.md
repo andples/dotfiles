@@ -16,6 +16,7 @@ git clone https://github.com/andples/dotfiles.git ~/dotfiles && ~/dotfiles/insta
 - `./install.sh -n` shows what it would do without changing anything
 - `./install.sh git zsh` installs just those packages
 - `./install.sh --check` only checks for missing tools
+- `./install.sh peek` (macOS) downloads, builds and installs Peek, the Markdown viewer below
 
 At the end it lists missing tools (fzf, zoxide, eza, starship, ...) with the install command
 for your OS (brew, pacman, apt, dnf, zypper). Without admin rights it suggests
@@ -46,7 +47,45 @@ linked. Instead each `zed/<topic>.json` snippet (e.g. `ocaml.json`) is merged in
 keys from the snippets win and everything else you've set is kept. The old file is backed
 up first, since comments in it don't survive the merge. Re-run `./install.sh zed` after
 editing a snippet. Removing a key from a snippet doesn't remove it from `settings.json`.
-Merging needs `python3`; without it the step is skipped.
+Merging needs `python3`; without it the step is skipped. `keymap.json` and `tasks.json`
+(under `zed/.config/zed/`) are linked as usual.
+
+Set up for Python (ty + ruff), OCaml, Rust (clippy), C/C++ (clangd), LaTeX, Typst and
+Markdown. Language servers are downloaded by Zed itself; the toolchains are yours to install.
+
+| Key (vim normal mode) | Does |
+|---|---|
+| `space p` | Markdown: pop it up formatted in [Peek](#peek) (`space P`: Zed's preview beside the file). LaTeX/Typst: open the PDF (LaTeX jumps to the cursor) |
+| `space r` / `space R` | re-run last task / pick a task (run file, tests, builds…) |
+| `space t` | run the test or `main` at the cursor |
+| `space o` / `space O` / `space z` | recent projects / open any folder (Zed's fuzzy picker, not the macOS dialog) / folder picker (same as `proj`: frequent folders, repos, or type a path) |
+| `space g g` | git panel (stage, commit, push); `space g` + `s` stage hunk, `r` undo hunk, `b` branch, `l` blame, `h` file history |
+| `space f` `space /` `space e` `space j` | files, project search, file tree, terminal |
+| `space d` `space a` `space c` `space F` | diagnostics, code actions, rename, format |
+
+LaTeX builds with latexmk on every save and the PDF follows the cursor. PDFs open through
+`pdfview` (in `bin`): Skim on macOS, Zathura on Linux; both reload on change. For the jump
+back from the PDF (Cmd-Shift-click in Skim), set Skim → Settings → Sync → Preset: Custom,
+Command: `/Applications/Zed.app/Contents/MacOS/cli`, Arguments: `"%file":%line`.
+Typst writes its PDF on save; for a live browser preview with click-to-jump, install
+`tinymist` and run the "Typst: live preview" task.
+
+### Peek
+
+`peek file.md` (in `bin`) pops Markdown up formatted in Peek, a small macOS viewer app built
+separately (private repo; `./install.sh peek` clones it to `~/.local/src/peek` and installs it).
+It opens `.md` files by default and has vim keys: `esc` closes, `space p` full window,
+`i` edits in Zed, `space ?` lists the rest. Without Peek, `peek` opens the file in the
+system's default app, so nothing here needs it.
+`space ?` in Zed shows the cheat sheet of this config's keys in it.
+
+In the shell, `proj` fuzzy-picks a folder: the ones you visit most (zoxide) first, then every
+git repo under `$PROJECT_DIRS` (default `~/Documents ~/dotfiles ~/code ~/src ~/projects`).
+Type a path (`~/`, `/`) to browse instead, Tab to go into a folder. Enter cd's there,
+Ctrl-O also opens it in Zed. `space z` in Zed is the same picker.
+
+`zed-playground/` (a submodule: `git submodule update --init`) has a small project in each
+language and a checklist for trying all of the above. Open it in Zed with `space O`.
 
 ## Your own settings and secrets
 

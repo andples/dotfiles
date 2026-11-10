@@ -1,0 +1,9 @@
+// Git: changed lines in the gutter, blame for the cursor line after a pause.
+// The git panel (space g g) stages, commits, pushes and pulls. See keymap.json for the keys.
+{
+  "git": {
+    "git_gutter": "tracked_files",
+    "inline_blame": { "enabled": true, "delay_ms": 800, "show_commit_summary": true }
+  },
+  "git_panel": { "dock": "left", "sort_by_path": false }
+}

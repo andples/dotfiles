@@ -1,0 +1,240 @@
+#!/usr/bin/env bash
+# A cheat sheet of *your* Zed keys and tasks (from keymap.json and tasks.json), not Zed's
+# defaults. For every key Zed knows, use its keymap editor (Cmd-K Cmd-S).
+#
+#   zed-keys            write the sheet to ~/.cache/zed-keys.md and print its path
+#   zed-keys --print    print it instead
+#
+# Zed runs this for `space ?`. Needs python3.
+set -e
+dir=${ZED_CONFIG_DIR:-$HOME/.config/zed}
+out=${XDG_CACHE_HOME:-$HOME/.cache}/zed-keys.md
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "zed-keys: needs python3" >&2
+  exit 1
+fi
+
+sheet=$(python3 - "$dir/keymap.json" "$dir/tasks.json" <<'PY'
+import json, re, sys
+
+def jsonc(path):
+    try:
+        text = open(path).read()
+    except OSError:
+        return []
+    out, i, n, s = [], 0, len(text), False
+    while i < n:  # drop // and /* */ comments and trailing commas, keeping strings intact
+        c = text[i]
+        if s:
+            out.append(c)
+            if c == "\\":
+                out.append(text[i + 1]); i += 1
+            elif c == '"':
+                s = False
+        elif c == '"':
+            s = True; out.append(c)
+        elif text.startswith("//", i):
+            j = text.find("\n", i); i = n if j < 0 else j; continue
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2); i = n if j < 0 else j + 2; continue
+        elif c == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1; continue
+            out.append(c)
+        else:
+            out.append(c)
+        i += 1
+    return json.loads("".join(out) or "[]")
+
+# what each action does, in words (unknown actions fall back to their name)
+WORDS = {
+    "file_finder::Toggle": "find a file",
+    "pane::DeploySearch": "search the whole project",
+    "project_panel::ToggleFocus": "file tree",
+    "diagnostics::Deploy": "all errors and warnings",
+    "terminal_panel::ToggleFocus": "terminal",
+    "editor::ToggleCodeActions": "code actions (quick fixes)",
+    "editor::Rename": "rename symbol everywhere",
+    "editor::Format": "format file",
+    "task::Rerun": "re-run the last task",
+    "task::Spawn": "pick a task to run",
+    "editor::SpawnNearestTask": "run the test / main at the cursor",
+    "projects::OpenRecent": "recent projects",
+    "workspace::Open": "open any folder (Zed's path picker)",
+    "git_panel::ToggleFocus": "git panel: stage, commit, push",
+    "git::ToggleStaged": "stage / unstage this change",
+    "git::StageFile": "stage the whole file",
+    "git::Restore": "undo this change",
+    "editor::ToggleSelectedDiffHunks": "show this change's diff inline",
+    "git::Diff": "diff of all changes",
+    "git::Commit": "commit",
+    "git::Push": "push",
+    "git::Pull": "pull",
+    "git::Fetch": "fetch",
+    "git::Branch": "switch / create branch",
+    "editor::ToggleGitBlameInline": "blame on the current line (toggle)",
+    "git::Blame": "blame for the whole file",
+    "git::FileHistory": "this file's git history",
+    "markdown::OpenPreviewToTheSide": "Zed's Markdown preview beside the file",
+}
+TASK_WORDS = {
+    "Peek": "pop it up formatted in Peek (esc closes, space ? its keys)",
+    "View PDF": "open the PDF (LaTeX: at the cursor)",
+    "Open project": "folder picker: frequent folders, repos, or type a path",
+    "Show my keys": "this cheat sheet",
+}
+
+def describe(action):
+    if isinstance(action, list):
+        name, args = action[0], (action[1] if len(action) > 1 else {})
+        if name == "task::Spawn" and "task_name" in args:
+            t = args["task_name"]
+            return TASK_WORDS.get(t, f"run task “{t}”"), name, t
+        return WORDS.get(name, name), name, None
+    return WORDS.get(action, action), action, None
+
+def section(name, task):
+    if task in ("View PDF", "Peek") or name.startswith("markdown::"):
+        return "Preview"
+    if task == "Show my keys":
+        return "Help"
+    if name.startswith(("git", "editor::ToggleGitBlame", "editor::ToggleSelectedDiffHunks")):
+        return "Git"
+    if name.startswith("projects::") or name == "workspace::Open" or task == "Open project":
+        return "Projects"
+    if name.startswith("task::") or name == "editor::SpawnNearestTask":
+        return "Tasks"
+    if name in ("editor::ToggleCodeActions", "editor::Rename", "editor::Format"):
+        return "Code"
+    return "Find and navigate"
+
+EXT = {"md": "Markdown", "tex": "LaTeX", "typ": "Typst", "py": "Python", "rs": "Rust",
+       "ml": "OCaml", "cpp": "C++"}
+
+def where(ctx):
+    if not ctx:
+        return ["anywhere"]
+    places = []
+    if "EmptyPane" in ctx:
+        places.append("no file open")
+    if "ProjectPanel" in ctx:
+        places.append("file tree")
+    if "Editor" in ctx:
+        exts = re.findall(r"extension == (\w+)", ctx)
+        kind = " / ".join(EXT.get(e, "." + e) for e in exts) + " files" if exts else "files"
+        places.append(kind + (" (normal mode)" if "vim_mode == normal" in ctx else ""))
+    return places or [ctx]
+
+keymap, tasks = jsonc(sys.argv[1]), jsonc(sys.argv[2])
+order = ["Find and navigate", "Code", "Tasks", "Preview", "Projects", "Git", "Help"]
+rows = {}  # (section, key, words) -> places
+for block in keymap:
+    for key, action in block.get("bindings", {}).items():
+        words, name, task = describe(action)
+        r = rows.setdefault((section(name, task), key, words), [])
+        for p in where(block.get("context", "")):
+            if p not in r:
+                r.append(p)
+
+def keyfmt(k):
+    return "`" + k + "`"
+
+def slug(h):  # GitHub-style heading anchor
+    return re.sub(r"[^a-z0-9 -]", "", h.lower()).strip().replace(" ", "-")
+
+def places(p):
+    if {"no file open", "file tree"} <= set(p) and any(x.startswith("files") for x in p):
+        return "everywhere"
+    return ", ".join(p)
+
+# per language: what the setup does, which task prefix and file extensions belong to it
+LANGS = [
+    ("Python", "Python", ["py"], [
+        "Checks: **ty** (real type errors only, no annotations required) and **ruff** (lint)",
+        "On save: ruff formats and sorts imports",
+        "Inline type hints: off",
+        "`space t` on a test function runs it",
+    ]),
+    ("OCaml", "OCaml", ["ml", "mli"], [
+        "Checks: **ocamllsp**, with inferred types shown inline and above definitions",
+        "On save: ocamlformat, in projects with a `.ocamlformat` file",
+    ]),
+    ("Rust", "Rust", ["rs"], [
+        "Checks: **rust-analyzer**, running **clippy** on save",
+        "On save: rustfmt",
+        "`space t` on a test or `main` runs it",
+    ]),
+    ("C++", "C++", ["cpp", "cc", "h", "hpp"], [
+        "Checks: **clangd** (reads `compile_flags.txt` or `build/compile_commands.json`)",
+        "On save: clang-format style, honouring a project's `.clang-format`",
+    ]),
+    ("LaTeX", "LaTeX", ["tex"], [
+        "On save: **latexmk** builds the PDF and Skim jumps to the cursor",
+        "Cmd-Shift-click in Skim jumps back to the source line",
+        "chktex warnings show on open and save; no auto-formatting",
+    ]),
+    ("Typst", "Typst", ["typ"], [
+        "On save: **tinymist** writes the PDF next to the file and formats it",
+        "The PDF reloads itself in Skim once open",
+    ]),
+    ("Markdown", None, ["md"], [
+        "Long lines wrap; not formatted on save; trailing double spaces kept",
+        "Peek (macOS app), vim keys like Zed's: `esc` closes, `space p` full window, `space o` recent files, `space e` headings, `/` find, `i` edit in Zed, `space ?` all its keys",
+    ]),
+]
+
+sections = [s for s in order if any(k[0] == s for k in rows)]
+lang_heads = [name for name, *_ in LANGS]
+lines = ["# My Zed keys", "",
+         "Only what this config adds. Every key Zed knows: `cmd-k cmd-s`.  ",
+         "Space keys need vim normal mode (Esc).", "",
+         "**Keys:** " + " · ".join(f"[{s}](#{slug(s)})" for s in sections) + "  ",
+         "**Languages:** " + " · ".join(f"[{n}](#{slug(n)})" for n in lang_heads) + "  ",
+         "**Tasks:** [all tasks](#all-tasks)", ""]
+
+for sec in sections:
+    items = [(k, w, places(p)) for (s, k, w), p in rows.items() if s == sec]
+    # leader keys first, in typing order
+    items.sort(key=lambda r: (not r[0].startswith("space"), r[0].lower(), r[0]))
+    lines += [f"## {sec}", "", "| Key | Does | Where |", "|---|---|---|"]
+    lines += [f"| {keyfmt(k)} | {w} | {p} |" for k, w, p in items]
+    lines.append("")
+
+lines += ["# Languages", ""]
+for name, prefix, exts, notes in LANGS:
+    lines += [f"## {name}", ""]
+    lines += [f"- {n}" for n in notes]
+    keys = sorted({(k, w) for (s, k, w), p in rows.items()
+                   for pl in p if any(EXT.get(e) and EXT[e] in pl for e in exts)})
+    if keys:
+        lines.append("- Keys: " + " · ".join(f"{keyfmt(k)} {w}" for k, w in keys))
+    labels = [t["label"].split(": ", 1)[1] for t in tasks
+              if prefix and t.get("label", "").startswith(prefix + ": ")]
+    if labels:
+        lines.append("- Tasks (`space R`): " + " · ".join(labels))
+    lines.append("")
+
+lines += ["# All tasks", "", "`space R` picks one, `space r` re-runs the last.", ""]
+groups = {}
+for t in tasks:
+    label = t.get("label", "")
+    g, _, rest = label.partition(": ")
+    groups.setdefault(g if rest else "General", []).append(rest or label)
+for g, labels in groups.items():
+    lines.append(f"- **{g}**: " + " · ".join(labels))
+lines.append("")
+print("\n".join(lines))
+PY
+)
+
+if [ "$1" = --print ]; then
+  printf '%s\n' "$sheet"
+else
+  mkdir -p "$(dirname "$out")"
+  printf '%s\n' "$sheet" > "$out"
+  echo "$out"
+fi

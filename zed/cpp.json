@@ -1,0 +1,9 @@
+// C/C++: clangd (system one, or downloaded by Zed) formats on save, honouring a
+// project's .clang-format. Projects need a compile_commands.json for clangd to know
+// flags: `cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (Zed finds it in build/).
+{
+  "languages": {
+    "C++": { "formatter": { "language_server": { "name": "clangd" } } },
+    "C": { "formatter": { "language_server": { "name": "clangd" } } }
+  }
+}

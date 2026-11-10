@@ -1,0 +1,11 @@
+// Markdown: wrap long lines; `space p` opens Zed's live preview beside the file.
+{
+  "languages": {
+    "Markdown": {
+      "soft_wrap": "editor_width",
+      // trailing double space is a line break, so keep it
+      "remove_trailing_whitespace_on_save": false,
+      "format_on_save": "off"
+    }
+  }
+}

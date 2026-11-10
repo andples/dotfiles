@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# List git repos, the ones you visit most (zoxide) first, as ~/paths.
+# Used by the `proj` shell function and Zed's "Open project" task.
+#
+#   projects            search $PROJECT_DIRS (default: ~/Documents ~/dotfiles ~/code ~/src ~/projects)
+#
+# Repos up to 4 levels deep; node_modules, target, _build, .venv and Library are skipped.
+
+dirs=()
+for d in ${PROJECT_DIRS:-"$HOME/Documents" "$HOME/dotfiles" "$HOME/code" "$HOME/src" "$HOME/projects"}; do
+  [ -d "$d" ] && dirs+=("$d")
+done
+[ ${#dirs[@]} -eq 0 ] && exit 0
+
+repos=$(find "${dirs[@]}" -maxdepth 5 \
+  \( -name node_modules -o -name target -o -name _build -o -name .venv -o -name Library \) -prune -o \
+  -name .git -print 2>/dev/null | sed 's#/\.git$##' | sort -u)
+
+{
+  # most-visited first: zoxide's ranking, kept only where it's one of the repos
+  if command -v zoxide >/dev/null 2>&1; then
+    zoxide query -l 2>/dev/null | awk 'NR==FNR { r[$0] = 1; next } ($0 in r)' <(printf '%s\n' "$repos") -
+  fi
+  printf '%s\n' "$repos"
+} | awk 'NF && !seen[$0]++' | sed "s#^$HOME#~#"
