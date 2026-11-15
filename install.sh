@@ -22,7 +22,7 @@ run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Tools the configs use. Everything works without them, minus that feature.
-TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard"
+TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard tmux"
 # Tools mise can install into $HOME without admin rights
 MISE_TOOLS="nvim fzf zoxide eza bat starship direnv uv"
 

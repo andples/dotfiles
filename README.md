@@ -107,6 +107,13 @@ the hostname. Set `export MACHINE_NAME=...` in `local.sh` to change it.
 remote folder. Give the machine a nickname in `~/.ssh/config` and set
 `export SEND_HOST=<nickname>` in `local.sh`. See `send --help`.
 
+`claude-rc` keeps `claude --remote-control` sessions running in a tmux session called `rc`,
+one window per conversation. After a reauth, `claude-rc restart` (with `--login` after
+logging out of all devices) restarts the windows whose Remote Control disconnected, resuming
+the conversation each one is on and checking it came back. `claude-rc add NAME [DIR]`
+starts a new one, and `claude-rc up` brings them all back after a reboot. The list lives in
+`~/.config/claude-rc/sessions`, outside the repo. See `claude-rc --help`.
+
 ## Agent instructions
 
 Edit `agents/.config/agents/AGENTS.md`. Every agent's global instructions file links to it,
