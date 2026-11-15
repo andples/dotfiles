@@ -10,13 +10,20 @@ Every helper works the same in bash and zsh. Fork it and make it yours.
 git clone https://github.com/andples/dotfiles.git ~/dotfiles && ~/dotfiles/install.sh
 ```
 
-`install.sh` needs nothing but `sh`. It symlinks each file into `$HOME` (like
+`install.sh` needs nothing but `sh`. It lists the packages with this machine's defaults
+ticked (type numbers to toggle, enter to install), symlinks each file into `$HOME` (like
 `stow --no-folding`), moves anything in the way to `~/.dotfiles-backup/`, and is safe to re-run.
 
+- `./install.sh -y` installs the defaults without asking (so does running it without a terminal)
 - `./install.sh -n` shows what it would do without changing anything
 - `./install.sh git zsh` installs just those packages
 - `./install.sh --check` only checks for missing tools
 - `./install.sh peek` (macOS) downloads, builds and installs Peek, the Markdown viewer below
+
+Packages marked personal below are mine (private repos, my agent instructions) and are only
+ticked on my machines: gh logged in as me, `DOTFILES_OWNER=1`, or a `~/.config/dotfiles/owner`
+file. `DOTFILES_OWNER=0 ./install.sh -n` shows what anyone else gets. A package that can't
+work on this OS is left out of the list, and skipped if you name it.
 
 At the end it lists missing tools (fzf, zoxide, eza, starship, ...) with the install command
 for your OS (brew, pacman, apt, dnf, zypper). Without admin rights it suggests
@@ -31,11 +38,13 @@ itself, and a missing tool never makes it fail.
 | `bin` | `~/.local/bin/`: helper scripts like `recentdl` and `send` | everywhere |
 | `git` | `~/.config/git/dotfiles.gitconfig`, included from your own `~/.config/git/config` | everywhere |
 | `starship` | `~/.config/starship.toml`: prompt with machine name, folder, git branch and status | everywhere |
-| `agents` | `~/.config/agents/AGENTS.md`, linked from Claude Code, Codex, opencode and pi | everywhere |
+| `agents` | `~/.config/agents/AGENTS.md`, linked from Claude Code, Codex, opencode and pi | personal |
 | `zsh` | `~/.zshrc` | macOS |
 | `nvim` | `~/.config/nvim/init.lua`: minimal, no plugins, for quick edits | not Omarchy (it has LazyVim) |
 | `zed` | snippets merged into `~/.config/zed/settings.json` (see below) | wherever Zed has been opened |
 | `readline` | `~/.inputrc` | bash without Omarchy |
+| `notes` | `notes` and `notes-sync` in `~/.local/bin`, a 2-minute sync timer (see [Notes](#notes)) | personal, when picked |
+| `peek` | builds the Peek app (see [Peek](#peek)) | personal, macOS, when picked |
 
 On Linux, `install.sh` adds one line to `~/.bashrc` that loads `shared.sh`, rather than
 replacing `~/.bashrc`.
@@ -86,6 +95,19 @@ Ctrl-O also opens it in Zed. `space z` in Zed is the same picker.
 
 `zed-playground/` (a submodule: `git submodule update --init`) has a small project in each
 language and a checklist for trying all of the above. Open it in Zed with `space O`.
+
+## Notes
+
+Plain Markdown in a git repo at `~/notes`, edited in Zed and read in Peek. `notes` opens the
+folder in Zed, `notes NAME` opens (or starts) `~/notes/NAME.md`, `notes -p NAME` shows it in
+Peek. The first run clones the repo (`NOTES_REPO`, owner/repo or a git URL).
+
+`notes-sync` commits whatever changed, rebases onto the remote and pushes; installing the
+package runs it every 2 minutes (a systemd user timer on Linux, a launchd agent on macOS) and
+`notes` runs it when it opens. Offline it waits for next time. On a conflict it stops with
+the repo as it is and sends one notification: fix the file, `git add` it,
+`git rebase --continue`. It never forces anything. Logs: `journalctl --user -u notes-sync`,
+or `~/Library/Logs/notes-sync.log`.
 
 ## Your own settings and secrets
 

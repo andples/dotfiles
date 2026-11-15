@@ -2,11 +2,15 @@
 # Link dotfiles into $HOME (same result as `stow --no-folding`), no dependencies.
 # Anything already in the way is moved to ~/.dotfiles-backup/<timestamp>/.
 #
-#   ./install.sh               pick packages for this machine
+#   ./install.sh               ask which packages to install (this machine's defaults ticked)
+#   ./install.sh -y            install the defaults without asking (also when not on a terminal)
 #   ./install.sh zsh git       only these packages
-#   ./install.sh -n ...        dry run: show what would happen
+#   ./install.sh -n ...        dry run: show what would happen (the picker still asks)
 #   ./install.sh --check       only check for missing tools
-#   ./install.sh peek          macOS: download, build and install the Peek app (optional)
+#
+# Personal packages (agents, notes, peek) are only ticked by default on the owner's machines:
+# gh logged in as the owner, DOTFILES_OWNER=1, or a ~/.config/dotfiles/owner file.
+# DOTFILES_OWNER=0 shows what anyone else gets.
 #
 # After linking it checks for missing tools and prints how to install them for this OS.
 # It never installs tools itself (only Peek, when asked), and missing tools never make it fail.
@@ -16,7 +20,16 @@ DOTFILES=$(cd "$(dirname "$0")" && pwd)
 BACKUP="$HOME/.dotfiles-backup/$(date +%Y%m%d-%H%M%S)"
 OS_RELEASE=${DOTFILES_OS_RELEASE:-/etc/os-release}
 DRY=
-if [ "$1" = -n ]; then DRY=1; shift; fi
+YES=
+while :; do
+  case $1 in
+    -n) DRY=1; shift ;;
+    -y) YES=1; shift ;;
+    -ny|-yn) DRY=1; YES=1; shift ;;
+    *) break ;;
+  esac
+done
+OWNER=andples
 
 run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -292,6 +305,58 @@ install_peek() {
   return 0
 }
 
+# notes: clone the repo, then start the sync timer
+LAUNCHD_LABEL=dotfiles.notes-sync
+setup_notes() {
+  if [ ! -d "${NOTES_DIR:-$HOME/notes}/.git" ]; then
+    if [ -n "$DRY" ]; then
+      echo "  would: notes --clone"
+    else
+      "$DOTFILES/notes/.local/bin/notes" --clone 2>&1 | sed 's/^notes: /  /'
+    fi
+  fi
+  if [ "$(uname)" = Darwin ]; then
+    # launchd needs absolute paths, so the agent is written, not linked
+    plist="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+    tmp="${TMPDIR:-/tmp}/dotfiles-notes.$$"
+    cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LAUNCHD_LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>$HOME/.local/bin/notes-sync</string><string>-q</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/notes-sync.log</string>
+</dict>
+</plist>
+PLIST
+    if cmp -s "$tmp" "$plist"; then
+      echo "  launchd agent up to date"
+    else
+      echo "  ~/Library/LaunchAgents/$LAUNCHD_LABEL.plist (sync every 2 minutes)"
+      run mkdir -p "$HOME/Library/LaunchAgents"
+      run cp "$tmp" "$plist"
+      run launchctl bootout "gui/$(id -u)/$LAUNCHD_LABEL" 2>/dev/null || true
+      run launchctl bootstrap "gui/$(id -u)" "$plist" || echo "  couldn't load it: launchctl bootstrap gui/$(id -u) $plist"
+    fi
+    rm -f "$tmp"
+  elif have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
+    if [ -z "$DRY" ] && systemctl --user is-enabled -q notes-sync.timer 2>/dev/null; then
+      return 0
+    fi
+    echo "  enabling notes-sync.timer (sync every 2 minutes)"
+    run systemctl --user daemon-reload
+    run systemctl --user enable -q --now notes-sync.timer || echo "  couldn't enable it"
+  else
+    echo "  no systemd user session: run notes-sync from cron or by hand"
+  fi
+}
+
 peek_installed() {
   [ -d /Applications/Peek.app ] || [ -d "$HOME/Applications/Peek.app" ]
 }
@@ -301,17 +366,130 @@ if [ "$1" = --check ]; then
   exit 0
 fi
 
-if [ $# -eq 0 ]; then
-  set -- shell bin git agents starship
-  # Omarchy ships its own LazyVim setup; only install the minimal nvim config elsewhere
-  if [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ]; then set -- "$@" nvim; fi
-  [ "$(uname)" = Darwin ] && set -- "$@" zsh
-  [ -z "$OMARCHY_PATH" ] && [ ! -d /usr/share/omarchy ] && set -- "$@" readline
+# Every package, in the order they're listed and installed:
+#   name|where it works (any, macos, linux)|personal|label
+PACKAGES='shell|any||aliases and functions for bash and zsh
+bin|any||helper scripts: proj, send, recentdl, peek, claude-rc, ...
+git|any||git settings, included from your own config
+starship|any||prompt with machine name and git status
+agents|any|personal|my instructions for Claude Code, Codex, opencode, pi
+zsh|any||~/.zshrc
+nvim|any||minimal plugin-free nvim config
+readline|any||~/.inputrc for bash
+zed|any||Zed settings, keys and tasks
+notes|any|personal|~/notes git repo (private), synced every 2 minutes
+peek|macos|personal|Peek Markdown viewer app (private repo, builds from source)'
+
+pkg_field() { # pkg_field NAME N
+  echo "$PACKAGES" | awk -F'|' -v n="$1" -v i="$2" '$1 == n { print $i }'
+}
+
+this_os() { if [ "$(uname)" = Darwin ]; then echo macos; else echo linux; fi; }
+
+# Why a package can't be installed here (empty if it can)
+pkg_unsupported() {
+  os=$(pkg_field "$1" 2)
+  if [ -z "$os" ] || [ "$os" = any ] || [ "$os" = "$(this_os)" ]; then return 0; fi
+  case $os in macos) echo "macOS only" ;; linux) echo "Linux only" ;; esac
+}
+
+is_owner() {
+  case $DOTFILES_OWNER in 1) return 0 ;; 0) return 1 ;; esac
+  [ -e "${XDG_CONFIG_HOME:-$HOME/.config}/dotfiles/owner" ] && return 0
+  # reads gh's local config, no network
+  have gh && [ "$(gh config get -h github.com user 2>/dev/null)" = "$OWNER" ]
+}
+
+omarchy() { [ -n "$OMARCHY_PATH" ] || [ -d /usr/share/omarchy ]; }
+
+# This machine's defaults. Without the picker (-y, or not on a terminal) only these are
+# installed, so scripted installs only gain a personal package (agents) on the owner's machines.
+default_packages() {
+  d="shell bin git starship"
+  if is_owner; then d="$d agents"; fi
+  if [ "$(uname)" = Darwin ]; then d="$d zsh"; fi
+  # Omarchy ships its own LazyVim setup and inputrc
+  if ! omarchy; then d="$d nvim readline"; fi
   # Zed creates this folder on first launch
-  [ -d "$HOME/.config/zed" ] && set -- "$@" zed
+  if [ -d "$HOME/.config/zed" ]; then d="$d zed"; fi
+  echo "$d"
+}
+
+# Ticked in the picker: the defaults, plus the owner's notes and (if missing) Peek
+picker_defaults() {
+  d=$(default_packages)
+  if is_owner; then
+    d="$d notes"
+    if [ "$(uname)" = Darwin ] && ! peek_installed; then d="$d peek"; fi
+  fi
+  echo "$d"
+}
+
+# Numbered list of what works here; numbers toggle, enter installs. Sets PICKED.
+pick() {
+  avail=
+  for p in $(echo "$PACKAGES" | cut -d'|' -f1); do
+    [ -z "$(pkg_unsupported "$p")" ] && avail="$avail $p"
+  done
+  sel=" $* "
+  while :; do
+    echo
+    i=0
+    for p in $avail; do
+      i=$((i + 1))
+      case $sel in *" $p "*) m=x ;; *) m=" " ;; esac
+      label=$(pkg_field "$p" 4)
+      [ -n "$(pkg_field "$p" 3)" ] && label="$label (personal)"
+      printf '  %2d [%s] %-9s %s\n' "$i" "$m" "$p" "$label"
+    done
+    printf 'toggle numbers, enter to install, q to quit: '
+    read -r ans || exit 1
+    case $ans in
+      '') break ;;
+      q|Q) exit 0 ;;
+    esac
+    for w in $ans; do
+      i=0
+      found=
+      for p in $avail; do
+        i=$((i + 1))
+        [ "$i" = "$w" ] || continue
+        found=1
+        case $sel in
+          *" $p "*) sel=$(echo "$sel" | sed "s/ $p / /") ;;
+          *) sel="$sel$p " ;;
+        esac
+      done
+      [ -n "$found" ] || echo "  no package $w"
+    done
+  done
+  PICKED=
+  for p in $avail; do
+    case $sel in *" $p "*) PICKED="$PICKED $p" ;; esac
+  done
+}
+
+if [ $# -eq 0 ]; then
+  if [ -z "$YES" ] && [ -t 0 ] && [ -t 1 ]; then
+    # shellcheck disable=SC2046
+    pick $(picker_defaults)
+    if [ -z "$PICKED" ]; then echo "nothing picked"; exit 0; fi
+    echo
+    # shellcheck disable=SC2086
+    set -- $PICKED
+  else
+    # shellcheck disable=SC2046
+    set -- $(default_packages)
+  fi
 fi
 
 for pkg in "$@"; do
+  why=$(pkg_unsupported "$pkg")
+  if [ -n "$why" ]; then
+    echo "$pkg"
+    echo "  skipped: $why"
+    continue
+  fi
   if [ "$pkg" = peek ]; then
     install_peek
     continue
@@ -333,6 +511,11 @@ for pkg in "$@"; do
       zed/*) continue ;;
     esac
 
+    # notes: the timer is a systemd unit on Linux, a generated launchd agent on macOS
+    case "$pkg/$rel" in
+      notes/.config/systemd/*) [ "$(uname)" = Darwin ] && continue ;;
+    esac
+
     # agent tools: only link into tools that are installed here
     case "$pkg/$rel" in
       agents/.config/agents/*) ;;
@@ -350,6 +533,7 @@ for pkg in "$@"; do
     run mkdir -p "$(dirname "$dest")"
     run ln -s "$src" "$dest"
   done
+  if [ "$pkg" = notes ]; then setup_notes; fi
 done
 
 # Remove links to files that are no longer in the repo (e.g. a package that was deleted)
@@ -391,7 +575,7 @@ fi
 
 [ -d "$BACKUP" ] && echo "old files saved in $BACKUP"
 check_deps || true
-if [ "$(uname)" = Darwin ] && ! peek_installed; then
+if [ "$(uname)" = Darwin ] && is_owner && ! peek_installed; then
   echo
   echo "Optional: Peek, the Markdown viewer behind Zed's space p: ./install.sh peek"
 fi
