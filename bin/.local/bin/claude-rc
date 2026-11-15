@@ -533,7 +533,12 @@ cmd_restart() {
     for n in $(windows); do
       is_server_entry "$n" || session_window "$n" && continue
       s=$(status "$n")
-      if [ -n "$all" ] || [ "$s" = disconnected ] || [ "$s" = exited ]; then names="$names $n"; fi
+      # A conversation whose claude is still running is never restarted automatically: if
+      # it only lives in Remote Control (no local transcript), killing it loses the session
+      if [ "$s" = disconnected ]; then
+        echo "$n: disconnected but still running, left alone (claude-rc restart $n to force)"
+      elif [ -n "$all" ] || [ "$s" = exited ]; then names="$names $n"
+      fi
     done
   fi
   [ -n "$names" ] || { echo "Everything is running, nothing to restart."; return; }
