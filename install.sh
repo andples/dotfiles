@@ -8,7 +8,7 @@
 #   ./install.sh -n ...        dry run: show what would happen (the picker still asks)
 #   ./install.sh --check       only check for missing tools
 #
-# Personal packages (agents, notes, peek) are only ticked by default on the owner's machines:
+# Personal packages (agents, peek) are only ticked by default on the owner's machines:
 # gh logged in as the owner, DOTFILES_OWNER=1, or a ~/.config/dotfiles/owner file.
 # DOTFILES_OWNER=0 shows what anyone else gets.
 #
@@ -311,8 +311,9 @@ setup_notes() {
   if [ ! -d "${NOTES_DIR:-$HOME/notes}/.git" ]; then
     if [ -n "$DRY" ]; then
       echo "  would: notes --clone"
-    else
-      "$DOTFILES/notes/.local/bin/notes" --clone 2>&1 | sed 's/^notes: /  /'
+    elif ! "$DOTFILES/notes/.local/bin/notes" --clone; then
+      echo "  no sync timer until ~/notes exists: run \`notes\`, then ./install.sh notes"
+      return 0
     fi
   fi
   if [ "$(uname)" = Darwin ]; then
@@ -377,7 +378,7 @@ zsh|any||~/.zshrc
 nvim|any||minimal plugin-free nvim config
 readline|any||~/.inputrc for bash
 zed|any||Zed settings, keys and tasks
-notes|any|personal|~/notes git repo (private), synced every 2 minutes
+notes|any||~/notes: your own notes repo (<you>/notes on GitHub), synced every 2 minutes
 peek|macos|personal|Peek Markdown viewer app (private repo, builds from source)'
 
 pkg_field() { # pkg_field NAME N

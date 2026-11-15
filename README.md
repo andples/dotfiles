@@ -43,7 +43,7 @@ itself, and a missing tool never makes it fail.
 | `nvim` | `~/.config/nvim/init.lua`: minimal, no plugins, for quick edits | not Omarchy (it has LazyVim) |
 | `zed` | snippets merged into `~/.config/zed/settings.json` (see below) | wherever Zed has been opened |
 | `readline` | `~/.inputrc` | bash without Omarchy |
-| `notes` | `notes` and `notes-sync` in `~/.local/bin`, a 2-minute sync timer (see [Notes](#notes)) | personal, when picked |
+| `notes` | `notes` and `notes-sync` in `~/.local/bin`, a 2-minute sync timer (see [Notes](#notes)) | when picked |
 | `peek` | builds the Peek app (see [Peek](#peek)) | personal, macOS, when picked |
 
 On Linux, `install.sh` adds one line to `~/.bashrc` that loads `shared.sh`, rather than
@@ -100,7 +100,9 @@ language and a checklist for trying all of the above. Open it in Zed with `space
 
 Plain Markdown in a git repo at `~/notes`, edited in Zed and read in Peek. `notes` opens the
 folder in Zed, `notes NAME` opens (or starts) `~/notes/NAME.md`, `notes -p NAME` shows it in
-Peek. The first run clones the repo (`NOTES_REPO`, owner/repo or a git URL).
+Peek. The first run clones your notes repo: `<your GitHub user>/notes` (from `gh`), which it
+offers to make, private, if you don't have one. Set `NOTES_REPO` (owner/repo or a git URL) in
+`local.sh` to use another. The sync timer starts once `~/notes` exists.
 
 `notes-sync` commits whatever changed, rebases onto the remote and pushes; installing the
 package runs it every 2 minutes (a systemd user timer on Linux, a launchd agent on macOS) and

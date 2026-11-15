@@ -4,12 +4,19 @@
 #   notes NAME        open (or start) ~/notes/NAME.md; NAME can be a/b
 #   notes -p NAME     show it formatted in Peek
 #   notes sync        sync now
-#   notes --clone     clone the repo to ~/notes if it isn't there
-# NOTES_DIR (default ~/notes) and NOTES_REPO (owner/repo or a git URL) override.
+#   notes --clone     clone your notes repo to ~/notes if it isn't there
+# The repo is <your gh user>/notes (offered to be made, private, if you don't have one yet).
+# NOTES_REPO (owner/repo or a git URL) and NOTES_DIR (default ~/notes) override.
 set -u
 dir=${NOTES_DIR:-$HOME/notes}
-repo=${NOTES_REPO:-andples/notes}
 have() { command -v "$1" >/dev/null 2>&1; }
+gh_ok() { have gh && gh auth status >/dev/null 2>&1; }
+
+repo=${NOTES_REPO:-}
+if [ -z "$repo" ] && have gh; then
+  user=$(gh config get -h github.com user 2>/dev/null)
+  [ -n "$user" ] && repo=$user/notes
+fi
 
 clone() {
   [ -d "$dir/.git" ] && return 0
@@ -17,16 +24,31 @@ clone() {
     echo "notes: $dir exists but isn't a git repo" >&2
     return 1
   fi
+  if [ -z "$repo" ]; then
+    echo "notes: no notes repo: log in with \`gh auth login\` (uses <you>/notes) or set NOTES_REPO" >&2
+    return 1
+  fi
+  case $repo in
+    *:*) ;;
+    *)
+      if gh_ok && ! gh repo view "$repo" >/dev/null 2>&1; then
+        [ -t 0 ] || { echo "notes: $repo doesn't exist: run \`notes\` to make it" >&2; return 1; }
+        printf 'notes: %s does not exist. Make it (private)? [y/N] ' "$repo"
+        read -r ans
+        case $ans in y|Y|yes) ;; *) return 1 ;; esac
+        gh repo create "$repo" --private >/dev/null || return 1
+      fi ;;
+  esac
   echo "notes: cloning $repo into $dir"
   case $repo in
     *:*) git clone -q "$repo" "$dir" ;;
-    *) if have gh && gh auth status >/dev/null 2>&1; then
-         gh repo clone "$repo" "$dir" -- -q
+    *) if gh_ok; then
+         gh repo clone "$repo" "$dir" -- -q 2>/dev/null
        else
          git clone -q "git@github.com:$repo.git" "$dir"
        fi ;;
   esac || {
-    echo "notes: couldn't clone $repo (private: log in with \`gh auth login\` or add your GitHub ssh key)" >&2
+    echo "notes: couldn't clone $repo (log in with \`gh auth login\` or add your GitHub ssh key)" >&2
     return 1
   }
 }
