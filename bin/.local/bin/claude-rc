@@ -1,36 +1,46 @@
 #!/usr/bin/env bash
-# Keep `claude --remote-control` sessions running in tmux, one window per conversation.
+# Keep Claude Remote Control running in tmux, and bring it back after a reauth or reboot.
 #
-#   claude-rc                  list windows, their conversation and whether Remote Control is up
-#   claude-rc restart          restart windows that are disconnected or exited (after a reauth)
-#   claude-rc restart a b      restart these windows      claude-rc restart --all   every window
-#   claude-rc restart --login  log in again first (after "log out of all devices")
-#   claude-rc up               create the tmux session and any windows that are missing
-#   claude-rc add NAME [DIR]   start a new conversation in DIR (default: here) and save it
-#     ... --resume ID          continue an existing conversation in it instead
-#     ... --server             run a `claude remote-control` server there (spawns sessions
-#                              from the app; those die with it, so prefer one window each)
-#   claude-rc rm NAME          close the window and forget it
-#   claude-rc save             write the list from the windows running now
+#   claude-rc                     list everything: servers and their sessions, conversations
+#   claude-rc ls --json           the same as JSON (for dashboards)
+#   claude-rc restart             restart what's down; --login logs in first (do that after
+#                                 "log out of all devices"); --all restarts everything
+#   claude-rc restart NAME ...    restart these
+#   claude-rc up                  start everything in the list that isn't running (after a reboot)
+#   claude-rc add NAME [DIR] --server     run a `claude remote-control` server in DIR
+#   claude-rc add NAME [DIR]              start a new conversation with Remote Control on
+#   claude-rc add NAME [DIR] --resume ID  ... or continue an existing conversation
+#   claude-rc reattach NAME LINK ...      bring sessions back into server NAME by their
+#                                         claude.ai/code/session_... link (or cse_... id)
+#   claude-rc rm NAME             stop it and forget it
+#   claude-rc save                write the list from the windows running now
 #
-# `claude-rc` also lists claude running in other tmux sessions, which it doesn't manage.
+# Servers: sessions you start from the app run inside the server and die with it. While a
+# server runs, claude-rc records which sessions it has (every 10s, from the process list).
+# A restarted server takes some back by itself; after 20s claude-rc reattaches the rest,
+# each in its own window, NAME.xxxxxx. A session drops off the record two minutes after
+# it ends while its server is still up, so a dying server can't wipe it. claude refuses to
+# attach a session twice, so nothing ends up duplicated.
 #
-# A restart resumes the conversation the window is on right now, even if it changed since
-# the window started (/clear, /resume): claude reports it via `claude agents --json`, so
-# nothing here depends on how claude names its files. Each restart is checked: the window
-# must come back on the same conversation, and if the first one doesn't the rest are left
-# alone. Text typed into a prompt but not sent is printed before its window restarts.
+# Conversations: a restart resumes the one the window is on now, even after /clear or
+# /resume (from `claude agents --json`), and checks it came back. If the first restart
+# fails the rest are left alone. Unsent text in a prompt is printed before a restart.
 #
-# The list in ~/.config/claude-rc/sessions (NAME SESSION-ID|server DIR per line) is what
-# `up` rebuilds from after a reboot; every run refreshes its ids from the live windows.
-# Only the tmux session $CLAUDE_RC_SESSION (default rc) is ever touched.
-# $CLAUDE_RC_FLAGS overrides the flags (default: --permission-mode auto --remote-control),
-# $CLAUDE_RC_SERVER_FLAGS adds flags for servers (e.g. --permission-mode auto).
+# Only the tmux session $CLAUDE_RC_SESSION (default rc) is touched; claude in other tmux
+# sessions is listed but left alone. The list (NAME ID|server DIR) is in
+# ~/.config/claude-rc/sessions, server records in ~/.local/state/claude-rc/, both private.
+# $CLAUDE_RC_FLAGS: conversation flags (default --permission-mode auto --remote-control).
+# $CLAUDE_RC_SERVER_FLAGS: extra server flags, e.g. --permission-mode auto.
 
+umask 077
 session=${CLAUDE_RC_SESSION:-rc}
 flags=${CLAUDE_RC_FLAGS:---permission-mode auto --remote-control}
 server_flags=${CLAUDE_RC_SERVER_FLAGS:-}
 list=${XDG_CONFIG_HOME:-$HOME/.config}/claude-rc/sessions
+state=${XDG_STATE_HOME:-$HOME/.local/state}/claude-rc
+interval=${CLAUDE_RC_INTERVAL:-10} # seconds between checks of a server's sessions
+forget=${CLAUDE_RC_FORGET:-120}    # seconds a session must be gone before it's forgotten
+adopt_wait=${CLAUDE_RC_ADOPT_WAIT:-20} # seconds a restarted server gets to take its sessions back
 
 # Extra tmux args, for testing on a private server: CLAUDE_RC_TMUX="-L test"
 t() { tmux $CLAUDE_RC_TMUX "$@"; }
@@ -38,18 +48,170 @@ die() { echo "claude-rc: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 have tmux || die "tmux isn't installed"
+self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+case $self in *\'*) die "claude-rc can't run from a path with a ' in it" ;; esac
+
+valid_name() { case $1 in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac; }
+valid_uuid() { printf '%s\n' "$1" | grep -qE '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$'; }
+valid_cse() { printf '%s\n' "$1" | grep -qE '^cse_[A-Za-z0-9]{8,64}$'; }
 
 has_session() { t has-session -t "=$session" 2>/dev/null; }
 windows() { has_session && t list-windows -t "=$session" -F '#{window_name}'; }
 has_window() { windows | grep -qxF -- "$1"; }
-pane() { t display -p -t "=$session:=$1" "$2"; }
+# A window's tmux id (@N), so names are never parsed as targets ("a.b" would mean window
+# a, pane b). A window that doesn't exist gets a target that can't match anything, so a
+# miss can never fall through to tmux's current window.
+target() {
+  local id
+  id=$(t list-windows -t "=$session" -F '#{window_id} #{window_name}' 2>/dev/null |
+    awk -v n="$1" 'substr($0, index($0, " ") + 1) == n { print $1; exit }')
+  echo "${id:-=$session:=claude-rc-no-such-window}"
+}
+pane() { t display -p -t "$(target "$1")" "$2"; }
 start_dir() { pane "$1" '#{?pane_start_path,#{pane_start_path},#{pane_current_path}}'; }
 
-# Lines of the list as "name id dir", skipping comments and blanks
-entries() { [ -f "$list" ] && grep -v '^[[:space:]]*\(#\|$\)' "$list"; }
+# --- the list --------------------------------------------------------------------------
+
+# Lines of the list as "name id dir", skipping comments, blanks and anything malformed
+# (a name other than letters, digits, _ -; an id other than a UUID or "server"; no dir)
+uuid_re='[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}'
+entry_re="^[A-Za-z0-9_-]+ (server|$uuid_re) /"
+entries() { [ -f "$list" ] && grep -E "$entry_re" "$list"; }
+check_list() {
+  [ -f "$list" ] || return 0
+  grep -vE '^[[:space:]]*(#|$)' "$list" | grep -vE "$entry_re" | while IFS= read -r l; do
+    echo "claude-rc: ignoring a malformed line in $list: $l" >&2
+  done
+}
 entry() { entries | awk -v n="$1" '$1 == n' | head -n 1; }
 list_id() { entry "$1" | awk '{print $2}'; }
 list_dir() { entry "$1" | sed 's/^[^ ]* [^ ]* //'; }
+is_server_entry() { [ "$(list_id "$1")" = server ]; }
+servers() { entries | awk '$2 == "server" {print $1}'; }
+# A window that holds a server's reattached session: NAME.xxxxxx of a server NAME
+session_window() {
+  case $1 in *.*) is_server_entry "${1%%.*}" ;; *) return 1 ;; esac
+}
+
+# --- processes ---------------------------------------------------------------------------
+
+# Command lines of every process in these panes (the pane processes and all descendants)
+tree() {
+  [ $# -gt 0 ] || return 0
+  ps -A -o pid= -o ppid= -o args= | awk -v roots="$*" '
+    BEGIN { n = split(roots, r, " "); for (i = 1; i <= n; i++) keep[r[i]] = 1 }
+    { pid[NR] = $1; ppid[NR] = $2; line[NR] = $0 }
+    END {
+      do {
+        changed = 0
+        for (i = 1; i <= NR; i++)
+          if (!(pid[i] in keep) && (ppid[i] in keep)) { keep[pid[i]] = 1; changed = 1 }
+      } while (changed)
+      for (i = 1; i <= NR; i++)
+        if (pid[i] in keep) { l = line[i]; sub(/^ *[0-9]+ +[0-9]+ +/, "", l); print l }
+    }'
+}
+# claude processes among those, as "claude <first argument>" only (never the rest of the
+# line). claude may run under an interpreter (node .../claude), but not `sh -c "claude"`.
+claude_cmds() {
+  awk '{ for (i = 1; i <= 2 && i <= NF; i++) if ($i ~ /(^|\/)claude$/) { print "claude " $(i + 1); break } }'
+}
+
+pane_pid() { pane "$1" '#{pane_pid}'; }
+# Pane pids of a server's own window and its NAME.* session windows
+group_pids() {
+  has_session || return 0
+  t list-panes -s -t "=$session" -F '#{window_name} #{pane_pid}' |
+    awk -v n="$1" '$1 == n || index($1, n ".") == 1 { print $2 }'
+}
+server_alive() {
+  has_window "$1" && tree "$(pane_pid "$1")" | claude_cmds | grep -qx 'claude remote-control'
+}
+# The sessions a server group is running right now, by their cse_ id
+server_sessions() {
+  tree $(group_pids "$1") | grep -oE -- '--session-id[ =]cse_[A-Za-z0-9]+' | sed 's/.*cse_/cse_/' | sort -u
+}
+
+# --- server records ----------------------------------------------------------------------
+
+record() { valid_name "$1" || die "bad server name '$1' in $list"; echo "$state/$1"; }
+# Recorded sessions of a server, one cse_ id per line
+record_ids() {
+  [ -f "$(record "$1")" ] || return 0
+  awk '{print $1}' "$(record "$1")" | while read -r id; do valid_cse "$id" && echo "$id"; done
+}
+# Write the record: sessions seen now get the current time; others stay until they've been
+# gone for $forget seconds. Pass "keep" to mark every recorded one as just seen (a restart).
+update_record() { # name live-ids [keep]
+  local f ts
+  f=$(record "$1") || return 1
+  ts=$(date +%s)
+  mkdir -p "$state"
+  touch "$f"
+  # read-modify-write in one go with a private temp file, so two writers (the background
+  # updater and `claude-rc reattach`) can't clobber each other's file
+  # the live ids go through the environment: BSD awk rejects newlines in -v values
+  CLAUDE_RC_LIVE=$2 awk -v ts="$ts" -v forget="$forget" -v keep="$3" '
+    BEGIN { n = split(ENVIRON["CLAUDE_RC_LIVE"], l, "\n"); for (i = 1; i <= n; i++) if (l[i] != "") seen[l[i]] = 1 }
+    $1 in seen { next }
+    keep != "" { print $1, ts; next }
+    ts - $2 < forget { print }
+    END { for (id in seen) print id, ts }' "$f" >"$f.$$" && mv "$f.$$" "$f"
+}
+add_to_record() { # name ids...
+  local name=$1 ids
+  shift
+  ids=$(printf '%s\n' "$@")
+  update_record "$name" "$ids"
+}
+
+# Reattach recorded sessions of a server that aren't running, each in its own window.
+# Prints how many it started.
+reattach_missing() { # name dir
+  local live id w n=0
+  live=$(server_sessions "$1")
+  for id in $(record_ids "$1"); do
+    printf '%s\n' "$live" | grep -qxF "$id" && continue
+    w="$1.$(printf '%s' "$id" | awk '{print substr($0, length($0) - 5)}')"
+    # The window closes when the session ends. On an error (e.g. the session was archived
+    # in the app) it shows the error for a while, then closes too.
+    local cmd="claude remote-control --session-id $id || { echo; echo 'claude-rc: could not reattach $id, closing in 5 minutes'; sleep 300; }"
+    if has_window "$w"; then t respawn-pane -k -t "$(target "$w")" -c "$2" "$cmd"
+    else t new-window -d -t "=$session:" -n "$w" -c "$2" "$cmd"
+    fi
+    n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# Runs inside a server's window: run the server in the foreground (so its keys work) and,
+# in the background, reattach recorded sessions it didn't pick up itself (a server that
+# starts again in the same folder takes some back on its own), then keep the record current.
+cmd_serve() {
+  local name=$1 watcher rc
+  valid_name "$name" || die "usage: claude-rc serve NAME [-- server flags]"
+  shift; [ "$1" = -- ] && shift
+  [ -n "$TMUX_PANE" ] && session=$(t display -p -t "$TMUX_PANE" '#{session_name}')
+  have claude || die "claude isn't installed"
+  update_record "$name" "" keep # restarting: nothing recorded is forgotten while it comes up
+  (
+    sleep "$adopt_wait"
+    server_alive "$name" && reattach_missing "$name" "$PWD" >/dev/null
+    while sleep "$interval"; do
+      kill -0 $$ 2>/dev/null || exit 0
+      server_alive "$name" || continue # never touch the record while the server is down
+      live=$(server_sessions "$name")
+      server_alive "$name" && update_record "$name" "$live"
+    done
+  ) >/dev/null 2>&1 &
+  watcher=$!
+  claude remote-control "$@"
+  rc=$?
+  kill "$watcher" 2>/dev/null
+  return $rc
+}
+
+# --- conversations -------------------------------------------------------------------------
 
 # The conversation each window's claude is on right now, as "window<TAB>session-id",
 # from claude's own scripting interface. A claude belongs to a window when it is the
@@ -84,31 +246,26 @@ start_id() {
   pane "$1" '#{pane_start_command}' |
     sed -nE 's/.*--(resume|session-id)[ =]([0-9a-fA-F-]{36}).*/\2/p'
 }
-# The claude command lines running in a pane (its process or its children)
-pane_claude() { # pane-pid
-  ps -A -o pid= -o ppid= -o args= |
-    awk -v p="$1" '($1 == p || $2 == p) && $3 ~ /(^|\/)claude$/ { $1 = $2 = ""; sub(/^ +/, ""); print }'
-}
-is_server() { has_window "$1" && pane_claude "$(pane "$1" '#{pane_pid}')" | grep -q '^[^ ]* remote-control'; }
+is_server() { has_window "$1" && tree "$(pane_pid "$1")" | claude_cmds | grep -qx 'claude remote-control'; }
 
-# Best known conversation for a window: live, then the list, then its start command.
-# "server" for a `claude remote-control` server.
+# Best known id for a window: "server", or its conversation: live, the list, its start command
 id_for() {
   local id
-  [ "$(list_id "$1")" = server ] && { echo server; return; }
+  is_server_entry "$1" && { echo server; return; }
   id=$(live_id "$1"); [ -n "$id" ] || id=$(list_id "$1"); [ -n "$id" ] || id=$(start_id "$1")
   [ -z "$id" ] && is_server "$1" && id=server
   echo "$id"
 }
 
-# Point a window's list entry at a new id (no-op for windows not in the list, and servers)
+# Point a conversation's list entry at a new id
 set_id() {
   [ -n "$2" ] && [ -n "$(entry "$1")" ] && [ "$(list_id "$1")" != "$2" ] || return 0
-  [ "$(list_id "$1")" = server ] && return 0
+  is_server_entry "$1" && return 0
+  valid_uuid "$2" || return 0
   awk -v n="$1" -v id="$2" '!/^[[:space:]]*#/ && $1 == n { $2 = id } { print }' "$list" >"$list.tmp" &&
     mv "$list.tmp" "$list"
 }
-# Refresh the list's ids from the windows running now
+# Refresh the list's conversation ids from the windows running now
 sync_list() {
   [ -f "$list" ] || return 0
   load_live
@@ -128,13 +285,17 @@ new_id() {
 }
 
 # What a window runs. A shell stays open after claude exits, so the window (and any
-# error message) survives. "new" creates the conversation with that id, "server" runs a
-# remote-control server, anything else is a conversation to resume.
+# error message) survives. "new" creates a conversation with that id, "server NAME" runs
+# a server, anything else is a conversation to resume.
+# Everything put into a command line is checked here, whatever the list file says.
 cmd_for() {
   case $1 in
-    new) echo "claude --session-id $2 $flags; exec \${SHELL:-bash}" ;;
-    server) echo "claude remote-control $server_flags; exec \${SHELL:-bash}" ;;
-    *) echo "claude --resume $1 $flags; exec \${SHELL:-bash}" ;;
+    new) valid_uuid "$2" || die "bad session id '$2'"
+         echo "claude --session-id $2 $flags; exec \${SHELL:-bash}" ;;
+    server) valid_name "$2" || die "bad server name '$2' in $list"
+            echo "'$self' serve $2 -- $server_flags; exec \${SHELL:-bash}" ;;
+    *) valid_uuid "$1" || die "bad session id '$1' in $list"
+       echo "claude --resume $1 $flags; exec \${SHELL:-bash}" ;;
   esac
 }
 
@@ -146,16 +307,16 @@ need_login() {
   claude auth login || die "login failed"
 }
 
-# connected / disconnected / exited / missing
+# connected / disconnected / exited / missing (servers: running / exited / missing)
 status() {
   has_window "$1" || { echo missing; return; }
-  local pid
-  pid=$(pane "$1" '#{pane_pid}')
-  if [ "$(pane "$1" '#{pane_dead}')" = 1 ] ||
-    ! ps -A -o pid= -o ppid= -o command= |
-      awk -v p="$pid" '($1 == p || $2 == p) && / [^ ]*claude( |$)/ { f = 1 } END { exit !f }'; then
+  if is_server_entry "$1"; then
+    if server_alive "$1"; then echo running; else echo exited; fi
+    return
+  fi
+  if [ "$(pane "$1" '#{pane_dead}')" = 1 ] || [ -z "$(tree "$(pane_pid "$1")" | claude_cmds)" ]; then
     echo exited
-  elif t capture-pane -p -t "=$session:=$1" | grep -q 'Remote Control disconnected'; then
+  elif t capture-pane -p -t "$(target "$1")" | grep -q 'Remote Control disconnected'; then
     echo disconnected
   else
     echo connected
@@ -164,8 +325,10 @@ status() {
 
 # Text typed into a window's prompt but not sent yet
 pending() {
-  t capture-pane -p -t "=$session:=$1" | grep '^❯' | tail -n 1 | sed 's/^❯ *//; s/ *$//'
+  t capture-pane -p -t "$(target "$1")" | grep '^❯' | tail -n 1 | sed 's/^❯ *//; s/ *$//'
 }
+# A first-run question (trust this folder, spawn mode) waiting in a window
+asking() { t capture-pane -p -t "$(target "$1")" | grep -qE '\[y/N\]|Choose \['; }
 
 start() { # name cmd dir
   if has_session; then
@@ -175,15 +338,10 @@ start() { # name cmd dir
   fi
 }
 
-# Wait until a window's claude reports the expected conversation (a server: is still up)
+# Wait until a window's claude reports the expected conversation
 confirm() { # name id
   local i=0
-  if [ "$2" = server ]; then
-    sleep "${CLAUDE_RC_SERVER_WAIT:-8}"
-    [ "$(status "$1")" != exited ]
-    return
-  fi
-  while [ $i -lt ${CLAUDE_RC_WAIT:-30} ]; do
+  while [ $i -lt "${CLAUDE_RC_WAIT:-30}" ]; do
     sleep 1
     [ "$(live_ids | awk -F '\t' -v n="$1" '$1 == n {print $2; exit}')" = "$2" ] && return 0
     [ "$(status "$1")" = exited ] && return 1
@@ -192,59 +350,147 @@ confirm() { # name id
   return 1
 }
 
+# Wait for a server to come up with its recorded sessions; print what it has
+confirm_server() { # name
+  local n up i=0 wait=${CLAUDE_RC_SERVER_WAIT:-$((adopt_wait + 15))}
+  n=$(record_ids "$1" | grep -c .)
+  while :; do
+    sleep 2; i=$((i + 2))
+    if asking "$1"; then
+      echo "$1 is waiting for an answer (first run in this folder): tmux attach -t $session, pick '$1'"
+      return 0
+    fi
+    server_alive "$1" || { echo "$1 didn't stay up: tmux attach -t $session, pick '$1'"; return 1; }
+    up=$(server_sessions "$1" | grep -cxF -f <(record_ids "$1"; echo -))
+    [ "$up" -ge "$n" ] || [ $i -ge "$wait" ] && break
+  done
+  echo "$1: server running, $up of $n sessions back"
+  [ "$up" -ge "$n" ] || echo "  the missing ones may have been ended in the app; 'claude-rc' shows which"
+}
+
+restart_server() { # name
+  local dir n
+  dir=$(list_dir "$1"); [ -d "$dir" ] || dir=$(start_dir "$1")
+  [ -d "$dir" ] || { echo "skip $1: no folder $dir"; return 1; }
+  if server_alive "$1"; then
+    n=$(reattach_missing "$1" "$dir")
+    [ "$n" = 0 ] && { echo "$1: server and sessions already running"; return 0; }
+  elif has_window "$1"; then
+    t respawn-pane -k -t "$(target "$1")" -c "$dir" "$(cmd_for server "$1")"
+  else
+    start "$1" "$(cmd_for server "$1")" "$dir"
+  fi
+  confirm_server "$1"
+}
+
 restart() { # name; prints a line, fails if the window didn't come back on its conversation
   local id dir p
+  is_server_entry "$1" && { restart_server "$1"; return; }
   id=$(id_for "$1")
   dir=$(list_dir "$1"); [ -d "$dir" ] || dir=$(start_dir "$1")
   p=$(pending "$1")
   [ -n "$p" ] && echo "  note: $1 had unsent input: $p"
+  if [ "$id" = server ]; then # a server not in the list: just rerun it
+    t respawn-pane -k -t "$(target "$1")"
+    echo "restarted $1 (a server that isn't in the list; add it to get its sessions back)"
+    return
+  fi
   if [ -z "$id" ]; then # no known conversation: rerun whatever it was started with
-    t respawn-pane -k -t "=$session:=$1"
+    t respawn-pane -k -t "$(target "$1")"
     echo "restarted $1 (no session id known, not checked)"
     return
   fi
   set_id "$1" "$id"
-  t respawn-pane -k -t "=$session:=$1" -c "$dir" "$(cmd_for "$id")"
+  t respawn-pane -k -t "$(target "$1")" -c "$dir" "$(cmd_for "$id")"
   if confirm "$1" "$id"; then
-    if [ "$id" = server ]; then echo "restarted $1, server running"
-    else echo "restarted $1, resumed $id"
-    fi
+    echo "restarted $1, resumed $id"
   else
     echo "restarted $1 but it didn't come back on $id: tmux attach -t $session, then pick '$1'"
     return 1
   fi
 }
 
-# claude running in tmux sessions other than ours, which nothing here manages
+# claude running in tmux sessions other than ours, which nothing here manages:
+# "target<TAB>dir<TAB>claude <first arg>"
 others() {
   local s w pid dir c
   t list-panes -a -F "#{session_name}	#{window_index}	#{pane_pid}	#{pane_current_path}" 2>/dev/null |
     while IFS=$'\t' read -r s w pid dir; do
       [ "$s" = "$session" ] && continue
-      pane_claude "$pid" | while IFS= read -r c; do
-        printf '  %-8s %s: %s\n' "$s:$w" "${dir/#$HOME/\~}" "$c"
+      tree "$pid" | claude_cmds | sort -u | while IFS= read -r c; do
+        # sessions a server spawned are its business, show the server only
+        case $c in "claude --print") continue ;; esac
+        printf '%s\t%s\t%s\n' "$s:$w" "$dir" "$c"
       done
     done
 }
 
+# --- commands -----------------------------------------------------------------------------
+
+# Everything, one row per line: kind name status id dir server
+rows() {
+  local n id live_s s dir
+  sync_list
+  for n in $( { entries | awk '{print $1}'; windows; } | awk '!seen[$0]++'); do
+    session_window "$n" && continue
+    if is_server_entry "$n"; then
+      printf 'server\t%s\t%s\t\t%s\t\n' "$n" "$(status "$n")" "$(list_dir "$n")"
+      live_s=$(server_sessions "$n")
+      for id in $( { printf '%s\n' "$live_s"; record_ids "$n"; } | awk 'NF && !seen[$0]++'); do
+        if printf '%s\n' "$live_s" | grep -qxF "$id"; then s=running; else s=down; fi
+        printf 'session\t%s\t%s\t%s\t%s\t%s\n' \
+          "$n.$(printf '%s' "$id" | awk '{print substr($0, length($0) - 5)}')" "$s" "$id" "$(list_dir "$n")" "$n"
+      done
+    else
+      if has_window "$n"; then id=$(id_for "$n"); dir=$(start_dir "$n")
+      else id=$(list_id "$n"); dir=$(list_dir "$n")
+      fi
+      [ -n "$(entry "$n")" ] && dir=$(list_dir "$n")
+      printf 'conversation\t%s\t%s\t%s\t%s\t\n' "$n" "$(status "$n")" "$id" "$dir"
+    fi
+  done
+  others | while IFS=$'\t' read -r n dir c; do
+    printf 'unmanaged\t%s\trunning\t%s\t%s\t\n' "$n" "$c" "$dir"
+  done
+}
+
 cmd_ls() {
-  local n id o
-  if has_session || [ -f "$list" ]; then
-    sync_list
-    for n in $( { entries | awk '{print $1}'; windows; } | awk '!seen[$0]++'); do
-      if has_window "$n"; then id=$(id_for "$n"); else id=$(list_id "$n"); fi
-      printf '%-20s %-13s %s\n' "$n" "$(status "$n")" "${id:--}"
-    done
-  else
+  local json= r
+  [ "$1" = --json ] && json=1
+  if ! has_session && [ ! -f "$list" ] && [ -z "$json" ]; then
     echo "No '$session' tmux session and no list yet. See claude-rc --help."
   fi
-  o=$(others)
-  if [ -n "$o" ]; then
-    echo
-    echo "Also running in other tmux sessions (not managed, restart them yourself or move them"
-    echo "here with 'claude-rc add NAME DIR --resume ID' or '... --server'):"
-    echo "$o"
+  r=$(rows)
+  if [ -n "$json" ]; then
+    have python3 || die "--json needs python3"
+    printf '%s\n' "$r" | python3 -c '
+import json, sys
+keys = ["kind", "name", "status", "id", "dir", "server"]
+out = []
+for line in sys.stdin.read().splitlines():
+    if not line:
+        continue
+    row = dict(zip(keys, line.split("\t")))
+    if row.get("kind") == "unmanaged":
+        row["command"], row["id"] = row["id"], ""
+    out.append({k: v for k, v in row.items() if v != ""})
+print(json.dumps(out, indent=2))'
+    return
   fi
+  printf '%s\n' "$r" | awk -F '\t' -v home="$HOME" '
+    function short(d) { if (index(d, home) == 1) d = "~" substr(d, length(home) + 1); return d }
+    $1 == "server" { printf "%-20s %-13s server in %s\n", $2, $3, short($5) }
+    $1 == "session" { printf "  %-18s %-13s %s\n", $2, $3, $4 }
+    $1 == "conversation" { printf "%-20s %-13s %s\n", $2, $3, ($4 == "" ? "-" : $4) }
+    $1 == "unmanaged" { other = other sprintf("  %-18s %s in %s\n", $2, $4, short($5)) }
+    END {
+      if (other != "") {
+        print ""
+        print "Also running in other tmux sessions (not managed; move a server here with"
+        print "claude-rc add NAME DIR --server, then claude-rc reattach NAME LINK for its sessions):"
+        printf "%s", other
+      }
+    }'
 }
 
 cmd_up() {
@@ -253,39 +499,56 @@ cmd_up() {
   local name id dir
   while read -r name id dir; do
     has_window "$name" && continue
-    if [ -d "$dir" ]; then start "$name" "$(cmd_for "$id")" "$dir" && echo "started $name"
-    else echo "skip $name: no folder $dir" >&2
+    if [ ! -d "$dir" ]; then echo "skip $name: no folder $dir" >&2; continue; fi
+    if [ "$id" = server ]; then start "$name" "$(cmd_for server "$name")" "$dir"
+    else start "$name" "$(cmd_for "$id")" "$dir"
     fi
+    echo "started $name"
   done <<EOF
 $(entries)
 EOF
 }
 
+# Does this server need a restart: server down, or a recorded session not running
+server_down() {
+  server_alive "$1" || return 0
+  [ -n "$(record_ids "$1" | grep -vxF -f <(server_sessions "$1"; echo -))" ]
+}
+
 cmd_restart() {
-  has_session || die "no '$session' tmux session: run 'claude-rc up'"
   local all= login= names= n s first=1 failed=
   for n in "$@"; do
     case $n in
       -a|--all) all=1 ;;
       -l|--login) login=1 ;;
       -*) die "unknown option $n" ;;
-      *) has_window "$n" || die "no window '$n'"; names="$names $n" ;;
+      *) { [ -n "$(entry "$n")" ] || has_window "$n"; } || die "nothing called '$n'"
+         names="$names $n" ;;
     esac
   done
   if [ -z "$names" ]; then
+    for n in $(servers); do
+      if [ -n "$all" ] || server_down "$n"; then names="$names $n"; fi
+    done
     for n in $(windows); do
+      is_server_entry "$n" || session_window "$n" && continue
       s=$(status "$n")
       if [ -n "$all" ] || [ "$s" = disconnected ] || [ "$s" = exited ]; then names="$names $n"; fi
     done
   fi
-  [ -n "$names" ] || { echo "All connected, nothing to restart."; return; }
+  [ -n "$names" ] || { echo "Everything is running, nothing to restart."; return; }
   need_login "$login"
   load_live # read every window's conversation before any of them restarts
   for n in $names; do
-    if ! restart "$n"; then
+    if [ -n "$all" ] && is_server_entry "$n" && server_alive "$n"; then
+      # --all on a running server: restart it (its sessions are recorded and come back)
+      update_record "$n" "$(server_sessions "$n")"
+      t respawn-pane -k -t "$(target "$n")" -c "$(list_dir "$n")" "$(cmd_for server "$n")"
+      confirm_server "$n" || failed="$failed $n"
+    elif ! restart "$n"; then
       failed="$failed $n"
       if [ -n "$first" ]; then
-        echo "Stopped: the first restart didn't work, so the other windows were left as they are." >&2
+        echo "Stopped: the first restart didn't work, so the rest were left as they are." >&2
         return 1
       fi
     fi
@@ -296,7 +559,7 @@ cmd_restart() {
 
 cmd_add() {
   local usage="usage: claude-rc add NAME [DIR] [--resume ID | --server]"
-  local name= dir= id= mode=new
+  local name= dir= id= mode=new cmd
   while [ $# -gt 0 ]; do
     case $1 in
       --resume) [ $# -ge 2 ] || die "$usage"; id=$2 mode=resume; shift 2 ;;
@@ -307,67 +570,96 @@ cmd_add() {
     esac
   done
   [ -n "$name" ] || die "$usage"
-  case $name in *[!A-Za-z0-9._-]*) die "use only letters, digits, . _ - in names" ;; esac
-  case $mode:$id in resume:*[!0-9a-fA-F-]*|resume:) die "--resume takes a session id (a UUID)" ;; esac
+  valid_name "$name" || die "use only letters, digits, _ and - in names"
+  [ $mode = resume ] && ! valid_uuid "$id" && die "--resume takes a conversation id (a UUID)"
   [ -n "$(entry "$name")" ] && die "'$name' is already in the list"
   has_window "$name" && die "there's already a window called '$name'"
   dir=$(cd "${dir:-$PWD}" 2>/dev/null && pwd) || die "no folder $dir"
   need_login
   case $mode in
     new) id=$(new_id); cmd=$(cmd_for new "$id") ;;
-    server) id=server; cmd=$(cmd_for server) ;;
+    server) id=server; cmd=$(cmd_for server "$name") ;;
     resume) cmd=$(cmd_for "$id") ;;
   esac
   mkdir -p "$(dirname "$list")"
   echo "$name $id $dir" >>"$list"
   start "$name" "$cmd" "$dir"
-  if [ $mode = new ]; then
-    echo "started $name in $dir (attach: tmux attach -t $session)"
-  elif confirm "$name" "$id"; then
-    if [ $mode = server ]; then echo "started server $name in $dir"
-    else echo "started $name in $dir, resumed $id"
-    fi
-  else
-    echo "started $name but it didn't come up on $id: tmux attach -t $session, then pick '$name'"
-    return 1
-  fi
+  case $mode in
+    new) echo "started $name in $dir (attach: tmux attach -t $session)" ;;
+    server) confirm_server "$name" ;;
+    resume)
+      if confirm "$name" "$id"; then echo "started $name in $dir, resumed $id"
+      else
+        echo "started $name but it didn't come up on $id: tmux attach -t $session, then pick '$name'"
+        return 1
+      fi ;;
+  esac
+}
+
+# Bring sessions into a server's record by link or id, then attach them
+cmd_reattach() {
+  local name=$1 a id ids= dir
+  [ -n "$name" ] && [ $# -ge 2 ] || die "usage: claude-rc reattach SERVER LINK|cse_ID ..."
+  is_server_entry "$name" || die "'$name' isn't a server in the list (claude-rc add $name DIR --server)"
+  shift
+  for a in "$@"; do
+    # https://claude.ai/code/session_X, session_X and cse_X are the same session
+    id=$(printf '%s\n' "$a" | sed -E 's#^.*/##; s#[?\#].*$##; s#^session_#cse_#')
+    valid_cse "$id" || die "not a session link or id: $a"
+    ids="$ids $id"
+  done
+  add_to_record "$name" $ids
+  server_alive "$name" || { echo "Recorded. '$name' isn't running: claude-rc restart $name"; return; }
+  dir=$(list_dir "$name")
+  echo "reattaching $(reattach_missing "$name" "$dir") session(s)"
+  confirm_server "$name"
 }
 
 cmd_rm() {
   [ -n "$1" ] || die "usage: claude-rc rm NAME"
   [ -n "$(entry "$1")" ] || has_window "$1" || die "no '$1' in the list or tmux"
-  local id
+  local id w
   id=$(id_for "$1")
   if [ -f "$list" ]; then
     awk -v n="$1" '/^[[:space:]]*#/ || $1 != n' "$list" >"$list.tmp" && mv "$list.tmp" "$list"
   fi
-  has_window "$1" && t kill-window -t "=$session:=$1"
-  echo "removed $1${id:+ (claude --resume $id opens it again)}"
+  if [ "$id" = server ]; then
+    for w in $(windows); do case $w in "$1".*) t kill-window -t "$(target "$w")" ;; esac; done
+    rm -f "$(record "$1")"
+  fi
+  has_window "$1" && t kill-window -t "$(target "$1")"
+  if [ "$id" = server ]; then echo "removed server $1 and its sessions"
+  else echo "removed $1${id:+ (claude --resume $id opens it again)}"
+  fi
 }
 
 cmd_save() {
   has_session || die "no '$session' tmux session"
   local name id out= skipped=
   for name in $(windows); do
+    session_window "$name" && continue
     id=$(id_for "$name")
-    if [ -z "$id" ]; then skipped="$skipped $name"; continue; fi
+    if [ -z "$id" ] || ! valid_name "$name"; then skipped="$skipped $name"; continue; fi
     out="$out$name $id $(start_dir "$name")"$'\n'
   done
   [ -n "$out" ] || die "couldn't find a conversation id for any window"
   mkdir -p "$(dirname "$list")"
   [ -f "$list" ] && cp "$list" "$list.bak"
-  { echo "# NAME SESSION-ID DIR (claude-rc --help)"; printf '%s' "$out"; } >"$list"
+  { echo "# NAME SESSION-ID|server DIR (claude-rc --help)"; printf '%s' "$out"; } >"$list"
   echo "Saved $(printf '%s' "$out" | grep -c .) windows to $list"
-  [ -z "$skipped" ] || echo "Skipped (no conversation id found):$skipped"
+  [ -z "$skipped" ] || echo "Skipped (no id found, or a name with other than letters, digits, _ -):$skipped"
 }
 
+case ${1:-ls} in ls|up|restart|add|reattach|rm|save) check_list ;; esac
 case ${1:-ls} in
-  ls) cmd_ls ;;
+  ls) shift; cmd_ls "$@" ;;
   up) cmd_up ;;
   restart) shift; cmd_restart "$@" ;;
   add) shift; cmd_add "$@" ;;
+  reattach) shift; cmd_reattach "$@" ;;
   rm) shift; cmd_rm "$@" ;;
   save) cmd_save ;;
-  -h|--help|help) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' ;;
+  serve) shift; cmd_serve "$@" ;;
+  -h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command '$1' (see claude-rc --help)" ;;
 esac
