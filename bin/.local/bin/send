@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Copy files to a remote machine, picking both ends with fzf.
+#
+#   send                 pick files here (Tab marks several), then pick the remote folder
+#   send a.pdf notes/    send these, pick the remote folder
+#   send a.pdf -- dir    send to ~/dir on the remote, no picker
+#   send -h otherhost …  use another host for this run
+#   send -r              rescan the remote folder list (also Ctrl-R in the picker)
+#
+# The host comes from $SEND_HOST, set per machine in ~/.config/shell/local.sh, and is
+# best a nickname from ~/.ssh/config (`Host box` + HostName, User, ...), so no host
+# details live in this repo. Remote folders under ~ are cached in ~/.cache/send/ for a day.
+#
+# Local picker: Ctrl-H searches all of ~ instead of the current folder.
+# Remote picker: type a new path and press Alt-Enter to send there (it's created).
+
+ssh_opts=(-o ControlMaster=auto -o "ControlPath=$HOME/.ssh/send-%C" -o ControlPersist=10m)
+depth=${SEND_DEPTH:-5}
+host=${SEND_HOST:-}
+rescan=
+files=()
+dest=
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    -h) host=$2; shift 2 ;;
+    -r) rescan=1; shift ;;
+    --) dest=${2:-'~'}; shift; [ $# -gt 0 ] && shift; break ;;
+    --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # internal, run by fzf
+    --scan) host=$2; scan=1; shift 2 ;;
+    --preview) host=$2 preview=$3; shift 3 ;;
+    *) files+=("$1"); shift ;;
+  esac
+done
+
+mkdir -p "$HOME/.ssh"
+rssh() { ssh "${ssh_opts[@]}" "$host" "$@"; }
+# "~/a b" -> a shell-quoted path relative to the remote home: 'a b'
+remote_rel() { local p=${1#"~"}; p=${p#/}; printf %q "${p:-.}"; }
+
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/send/$host"
+
+# every folder under the remote ~ (skipping dot folders and build junk), as ~/path
+scan_remote() {
+  mkdir -p "$(dirname "$cache")"
+  rssh "cd && find . -mindepth 1 -maxdepth $depth \\( -name '.*' -o -name node_modules \
+    -o -name __pycache__ -o -name target -o -name _build -o -name venv \\) -prune \
+    -o -type d -print 2>/dev/null" | sed 's#^\.#~#' | sort > "$cache.tmp" &&
+    { echo "~"; cat "$cache.tmp"; } > "$cache"
+  rm -f "$cache.tmp"
+  cat "$cache"
+}
+
+if [ -n "$scan" ]; then scan_remote; exit; fi
+if [ -n "$preview" ]; then rssh "cd && ls -Ap -- $(remote_rel "$preview")" 2>/dev/null; exit 0; fi
+
+if [ -z "$host" ]; then
+  echo "send: no host. Add  export SEND_HOST=<ssh nickname>  to ~/.config/shell/local.sh" >&2
+  echo "      (or pass -h <host>). Nicknames go in ~/.ssh/config." >&2
+  exit 1
+fi
+command -v fzf >/dev/null 2>&1 || { [ ${#files[@]} -gt 0 ] && [ -n "$dest" ]; } ||
+  { echo "send: needs fzf to pick (or give files and -- <remote dir>)" >&2; exit 1; }
+
+# 1. local files
+if [ ${#files[@]} -eq 0 ]; then
+  if command -v fd >/dev/null 2>&1; then
+    here="fd --hidden --exclude .git --strip-cwd-prefix"
+    home="fd --hidden --exclude .git --exclude Library . $HOME"
+  else
+    here="find . -mindepth 1 -name .git -prune -o -print | sed 's#^\./##'"
+    home="find $HOME -mindepth 1 \\( -name '.*' -o -name Library -o -name node_modules \\) -prune -o -print"
+  fi
+  if command -v bat >/dev/null 2>&1; then cat=bat; elif command -v batcat >/dev/null 2>&1; then cat=batcat; fi
+  view=${cat:+$cat --style=numbers --color=always}
+  while IFS= read -r f; do files+=("$f"); done < <(
+    eval "$here" | fzf --multi --scheme=path --prompt='send> ' \
+      --header="tab: mark several · ctrl-h: search all of ~ · → $host" \
+      --bind "ctrl-h:reload($home)+change-prompt(send ~> )" \
+      --preview="if [ -d {} ]; then ls -Ap {}; else ${view:-head -100} {}; fi"
+  )
+  [ ${#files[@]} -eq 0 ] && exit 130
+fi
+for f in "${files[@]}"; do
+  [ -e "$f" ] || { echo "send: no such file: $f" >&2; exit 1; }
+done
+
+# 2. remote folder
+if [ -z "$dest" ]; then
+  self=$(command -v send || echo "$0")
+  if [ -n "$rescan" ] || [ ! -s "$cache" ] || [ -z "$(find "$cache" -mtime -1 2>/dev/null)" ]; then
+    echo "send: scanning folders on $host..." >&2
+    list="'$self' --scan '$host'"
+  else
+    list="cat '$cache'"
+  fi
+  dest=$(eval "$list" | fzf --scheme=path --tiebreak=length,index --prompt="$host:" \
+    --header="sending ${#files[@]} item(s) · enter: pick · alt-enter: use typed path · ctrl-r: rescan" \
+    --bind "ctrl-r:reload('$self' --scan '$host')" \
+    --bind 'enter:accept-or-print-query' --bind 'alt-enter:print-query' \
+    --preview="'$self' --preview '$host' {}" --preview-window='right,40%') || exit 130
+  [ -z "$dest" ] && exit 130
+fi
+case $dest in "~"* | /*) ;; *) dest="~/$dest" ;; esac
+
+# 3. copy (mkdir -p first so a new path works)
+case $dest in
+  /*) rdest=$(printf %q "$dest") ;;
+  *) rdest=$(remote_rel "$dest") ;;
+esac
+rssh "cd && mkdir -p -- $rdest" || exit 1
+echo "send: ${files[*]} → $host:$dest" >&2
+if command -v rsync >/dev/null 2>&1; then
+  # -s: don't let the remote shell split the path (rsync >= 3.0; macOS's openrsync too)
+  rsync -avP -s -e "ssh ${ssh_opts[*]}" -- "${files[@]}" "$host:${dest/#\~/.}/"
+else
+  scp -r "${ssh_opts[@]}" -- "${files[@]}" "$host:${dest/#\~/.}/"
+fi

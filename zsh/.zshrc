@@ -16,6 +16,18 @@ bindkey '^[OA' up-line-or-beginning-search
 bindkey '^[[B' down-line-or-beginning-search
 bindkey '^[OB' down-line-or-beginning-search
 
+# Double-space types " && " (make<space><space>./run -> make && ./run).
+# Ctrl-V then space for a literal second space.
+space-or-and() {
+  if [[ $LBUFFER == *[^\ ]\  && $LBUFFER != *'&& ' ]]; then
+    LBUFFER="${LBUFFER% } && "
+  else
+    zle self-insert
+  fi
+}
+zle -N space-or-and
+bindkey ' ' space-or-and
+
 unsetopt BEEP # stop beep
 
 # Rebindings
@@ -41,3 +53,11 @@ for f in /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
          /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh; do
   [ -f "$f" ] && source "$f" && break
 done
+
+md() {
+  local width=80
+  local cols=$(tput cols)
+  local pad=$(( (cols - width) / 2 ))
+  (( pad < 0 )) && pad=0
+  glow -w "$width" "$@" | sed "s/^/$(printf '%*s' "$pad" '')/" | less -R
+}

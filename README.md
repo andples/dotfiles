@@ -28,7 +28,7 @@ itself, and a missing tool never makes it fail.
 | Package | Goes to | Installed on |
 |---|---|---|
 | `shell` | `~/.config/shell/shared.sh`: aliases and functions for bash and zsh | everywhere |
-| `bin` | `~/.local/bin/`: helper scripts like `recentdl` | everywhere |
+| `bin` | `~/.local/bin/`: helper scripts like `recentdl` and `send` | everywhere |
 | `git` | `~/.config/git/dotfiles.gitconfig`, included from your own `~/.config/git/config` | everywhere |
 | `starship` | `~/.config/starship.toml`: prompt with machine name, folder, git branch and status | everywhere |
 | `agents` | `~/.config/agents/AGENTS.md`, linked from Claude Code, Codex, opencode and pi | everywhere |
@@ -102,6 +102,10 @@ if they exist, so they can override anything:
 
 The prompt starts with a short machine name: `mac` on macOS, `oma` on Omarchy, otherwise
 the hostname. Set `export MACHINE_NAME=...` in `local.sh` to change it.
+
+`send` copies files to another machine and lets you fuzzy-pick both the local files and the
+remote folder. Give the machine a nickname in `~/.ssh/config` and set
+`export SEND_HOST=<nickname>` in `local.sh`. See `send --help`.
 
 ## Agent instructions
 
