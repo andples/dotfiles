@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Sync ~/notes with its remote: commit local changes, rebase onto the remote, push.
+# Run by a timer every 2 minutes (systemd on Linux, launchd on macOS) and by `notes`.
+#   notes-sync       sync, saying what it did
+#   notes-sync -q    quiet unless something needs you
+# A conflict stops it with the repo left as it is (resolve it, then `git rebase --continue`)
+# and sends one notification; it never forces anything.
+set -u
+dir=${NOTES_DIR:-$HOME/notes}
+quiet=
+[ "${1:-}" = -q ] && quiet=1
+have() { command -v "$1" >/dev/null 2>&1; }
+say() { [ -n "$quiet" ] || echo "notes-sync: $*"; }
+
+# Notify once per problem: a flag file stops the timer repeating it every 2 minutes,
+# and a clean run clears it
+alert() {
+  echo "notes-sync: $2" >&2
+  [ -f "$gitdir/notes-sync.$1" ] && return
+  : > "$gitdir/notes-sync.$1"
+  if [ "$(uname)" = Darwin ]; then
+    osascript -e "display notification \"$2\" with title \"notes\"" >/dev/null 2>&1
+  elif have notify-send; then
+    notify-send -u critical notes "$2" >/dev/null 2>&1
+  fi
+}
+
+if [ ! -d "$dir/.git" ]; then
+  echo "notes-sync: no git repo at $dir (run \`notes\` to clone it)" >&2
+  exit 1
+fi
+cd "$dir" || exit 1
+gitdir=$(git rev-parse --absolute-git-dir) || exit 1
+
+# One run at a time (the timer and `notes` can overlap); a lock older than 10 minutes is stale
+lock="$gitdir/notes-sync.lock"
+if ! mkdir "$lock" 2>/dev/null; then
+  [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] || exit 0
+  rmdir "$lock" 2>/dev/null
+  mkdir "$lock" 2>/dev/null || exit 0
+fi
+trap 'rmdir "$lock" 2>/dev/null' EXIT
+
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] ||
+   [ -f "$gitdir/MERGE_HEAD" ] || [ -n "$(git ls-files -u)" ]; then
+  alert conflict "conflict in $dir: fix it, then git rebase --continue"
+  exit 1
+fi
+rm -f "$gitdir/notes-sync.conflict"
+
+if ! git symbolic-ref -q HEAD >/dev/null; then
+  alert detached "$dir isn't on a branch"
+  exit 1
+fi
+rm -f "$gitdir/notes-sync.detached"
+
+if [ -n "$(git status --porcelain)" ]; then
+  host=$(uname -n)
+  git add -A && git commit -q -m "notes: ${host%%.*} $(date '+%Y-%m-%d %H:%M')" || exit 1
+  say "committed"
+fi
+
+# Offline or the remote is down: try again next time, no notification
+if ! git fetch -q 2>/dev/null; then
+  say "couldn't reach the remote"
+  exit 0
+fi
+
+if git rev-parse -q --verify '@{u}' >/dev/null; then
+  if [ -n "$(git rev-list -1 'HEAD..@{u}')" ]; then
+    if ! git rebase -q '@{u}' >/dev/null 2>&1; then
+      alert conflict "conflict in $dir: fix it, then git rebase --continue"
+      exit 1
+    fi
+    say "pulled"
+  fi
+  [ -z "$(git rev-list -1 '@{u}..HEAD')" ] && { rm -f "$gitdir/notes-sync.push"; exit 0; }
+  push="git push -q"
+else
+  push="git push -q -u origin HEAD"
+fi
+
+if $push 2>/dev/null; then
+  rm -f "$gitdir/notes-sync.push"
+  say "pushed"
+else
+  # someone pushed in between: the next run rebases onto it
+  git fetch -q 2>/dev/null && [ -n "$(git rev-list -1 'HEAD..@{u}' 2>/dev/null)" ] && exit 0
+  alert push "couldn't push $dir (it'll keep trying)"
+  exit 1
+fi

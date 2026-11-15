@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Notes: plain Markdown in a git repo at ~/notes, synced by notes-sync every 2 minutes.
+#   notes             open ~/notes in Zed
+#   notes NAME        open (or start) ~/notes/NAME.md; NAME can be a/b
+#   notes -p NAME     show it formatted in Peek
+#   notes sync        sync now
+#   notes --clone     clone the repo to ~/notes if it isn't there
+# NOTES_DIR (default ~/notes) and NOTES_REPO (owner/repo or a git URL) override.
+set -u
+dir=${NOTES_DIR:-$HOME/notes}
+repo=${NOTES_REPO:-andples/notes}
+have() { command -v "$1" >/dev/null 2>&1; }
+
+clone() {
+  [ -d "$dir/.git" ] && return 0
+  if [ -e "$dir" ]; then
+    echo "notes: $dir exists but isn't a git repo" >&2
+    return 1
+  fi
+  echo "notes: cloning $repo into $dir"
+  case $repo in
+    *:*) git clone -q "$repo" "$dir" ;;
+    *) if have gh && gh auth status >/dev/null 2>&1; then
+         gh repo clone "$repo" "$dir" -- -q
+       else
+         git clone -q "git@github.com:$repo.git" "$dir"
+       fi ;;
+  esac || {
+    echo "notes: couldn't clone $repo (private: log in with \`gh auth login\` or add your GitHub ssh key)" >&2
+    return 1
+  }
+}
+
+edit() {
+  if have zed; then zed "$@"
+  elif have zeditor; then zeditor "$@"
+  else
+    # terminal editor: just the file if there is one, then sync once it closes
+    shift $(($# - 1))
+    ${VISUAL:-${EDITOR:-vi}} "$1"
+    notes-sync
+  fi
+}
+
+file_for() {
+  case $1 in *.md) echo "$dir/$1" ;; *) echo "$dir/$1.md" ;; esac
+}
+
+case ${1:-} in
+  -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
+  --clone) clone; exit ;;
+  sync) clone && exec notes-sync ;;
+esac
+
+clone || exit 1
+# pull in what other machines wrote, without making the editor wait on the network
+have notes-sync && { notes-sync -q >/dev/null 2>&1 & }
+
+case ${1:-} in
+  '') edit "$dir" ;;
+  -p)
+    [ $# -ge 2 ] || { echo "usage: notes -p NAME" >&2; exit 2; }
+    f=$(file_for "$2")
+    [ -e "$f" ] || { echo "notes: no $f" >&2; exit 1; }
+    peek "$f" ;;
+  *)
+    f=$(file_for "$1")
+    mkdir -p "$(dirname "$f")"
+    edit "$dir" "$f" ;;
+esac
