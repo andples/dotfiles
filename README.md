@@ -109,11 +109,12 @@ remote folder. Give the machine a nickname in `~/.ssh/config` and set
 
 `claude-rc` keeps Claude Remote Control running in a tmux session called `rc`: servers
 (`claude-rc add NAME DIR --server`, which you start sessions on from the app) and single
-conversations (`claude-rc add NAME DIR`). It records which sessions each server is running, so
-after a reauth `claude-rc restart --login` brings the servers and their sessions back, and
-`claude-rc up` does the same after a reboot. `claude-rc ls --json` lists everything for
-scripts and dashboards. Its list and records live in `~/.config/claude-rc/` and
-`~/.local/state/claude-rc/`, outside the repo. See `claude-rc --help`.
+conversations (`claude-rc add NAME DIR`, or `--resume ID` to continue one). After a reauth,
+`claude-rc restart --login` restarts whatever exited, resuming conversations where they
+were; `claude-rc up` does the same after a reboot. Sessions inside a server end with it, so
+keep anything long-lived as its own conversation. `claude-rc ls --json` lists everything for
+scripts and dashboards. The list lives in `~/.config/claude-rc/`, outside the repo. See
+`claude-rc --help`.
 
 ## Agent instructions
 
