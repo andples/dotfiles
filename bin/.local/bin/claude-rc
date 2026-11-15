@@ -27,12 +27,12 @@
 # sessions is listed but left alone. The list (NAME ID|server DIR per line) is in
 # ~/.config/claude-rc/sessions, private to you.
 # $CLAUDE_RC_FLAGS: conversation flags (default --permission-mode auto --remote-control).
-# $CLAUDE_RC_SERVER_FLAGS: extra server flags, e.g. --permission-mode auto.
+# $CLAUDE_RC_SERVER_FLAGS: server flags (default --permission-mode auto, for the sessions it spawns).
 
 umask 077
 session=${CLAUDE_RC_SESSION:-rc}
 flags=${CLAUDE_RC_FLAGS:---permission-mode auto --remote-control}
-server_flags=${CLAUDE_RC_SERVER_FLAGS:-}
+server_flags=${CLAUDE_RC_SERVER_FLAGS:---permission-mode auto}
 list=${XDG_CONFIG_HOME:-$HOME/.config}/claude-rc/sessions
 
 # Extra tmux args, for testing on a private server: CLAUDE_RC_TMUX="-L test"
