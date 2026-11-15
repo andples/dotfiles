@@ -634,7 +634,7 @@ cmd_rm() {
   fi
   has_window "$1" && t kill-window -t "$(target "$1")"
   if [ "$id" = server ]; then echo "removed server $1 and its sessions"
-  else echo "removed $1${id:+ (claude --resume $id opens it again)}"
+  else echo "removed $1${id:+ (conversation $id)}"
   fi
 }
 
