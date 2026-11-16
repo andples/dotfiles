@@ -43,7 +43,8 @@ itself, and a missing tool never makes it fail.
 | `nvim` | `~/.config/nvim/init.lua`: minimal, no plugins, for quick edits | not Omarchy (it has LazyVim) |
 | `zed` | snippets merged into `~/.config/zed/settings.json` (see below) | wherever Zed has been opened |
 | `readline` | `~/.inputrc` | bash without Omarchy |
-| `notes` | `notes` and `notes-sync` in `~/.local/bin`, a 2-minute sync timer (see [Notes](#notes)) | when picked |
+| `direnv` | `~/.config/direnv/direnvrc`: `layout uv` for the `.envrc` that `uve` writes | where direnv is installed |
+| `notes` | `notes` and `notes-sync` in `~/.local/bin`, Typst templates, a 2-minute sync timer (see [Notes](#notes)) | when picked |
 | `peek` | builds the Peek app (see [Peek](#peek)) | personal, macOS, when picked |
 
 On Linux, `install.sh` adds one line to `~/.bashrc` that loads `shared.sh`, rather than
@@ -98,11 +99,25 @@ language and a checklist for trying all of the above. Open it in Zed with `space
 
 ## Notes
 
-Plain Markdown in a git repo at `~/notes`, edited in Zed and read in Peek. `notes` opens the
-folder in Zed, `notes NAME` opens (or starts) `~/notes/NAME.md`, `notes -p NAME` shows it in
-Peek. The first run clones your notes repo: `<your GitHub user>/notes` (from `gh`), which it
-offers to make, private, if you don't have one. Set `NOTES_REPO` (owner/repo or a git URL) in
-`local.sh` to use another. The sync timer starts once `~/notes` exists.
+Notes in a git repo at `~/notes`, written in [Typst](https://typst.app) (good for maths) and
+read as PDFs. `notes` opens the folder in Zed, `notes NAME` opens (or starts)
+`~/notes/NAME.typ`, `notes -p NAME` opens its PDF. Zed rebuilds the PDF on every save, and
+PDFs aren't committed. Markdown still works: `notes NAME.md`, read in Peek. The first run
+clones your notes repo: `<your GitHub user>/notes` (from `gh`), which it offers to make,
+private, if you don't have one. Set `NOTES_REPO` (owner/repo or a git URL) in `local.sh` to
+use another. The sync timer starts once `~/notes` exists.
+
+Every note imports `~/notes/template.typ`, a copy of one of the templates in
+`notes/.local/share/notes/templates/`: `classic` (the default, LaTeX look) or `math` (accent
+colour, tinted boxes for definitions and theorems). `notes template --preview` renders a
+sample note in both, `notes template NAME` switches. They share the same functions (`#definition`,
+`#theorem`, `#lemma`, `#proof`, `#example`, `#remark`), so switching never means editing notes.
+
+`notes pdfs` (once per notes repo) adds a GitHub Action that builds every note to PDF daily
+and publishes them on the repo's `latest` release, to read from anywhere
+(`github.com/<you>/notes/releases/latest`, or the GitHub app). It skips days with no new
+commits, so it uses well under the free Actions minutes. Pushing it over https needs
+`gh auth refresh -h github.com -s workflow` first; `notes pdfs` says so if it's missing.
 
 `notes-sync` commits whatever changed, rebases onto the remote and pushes; installing the
 package runs it every 2 minutes (a systemd user timer on Linux, a launchd agent on macOS) and

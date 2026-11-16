@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
-# Notes: plain Markdown in a git repo at ~/notes, synced by notes-sync every 2 minutes.
-#   notes             open ~/notes in Zed
-#   notes NAME        open (or start) ~/notes/NAME.md; NAME can be a/b
-#   notes -p NAME     show it formatted in Peek
-#   notes sync        sync now
-#   notes --clone     clone your notes repo to ~/notes if it isn't there
+# Notes: Typst (or Markdown) in a git repo at ~/notes, synced by notes-sync every 2 minutes.
+#   notes                     open ~/notes in Zed
+#   notes NAME                open (or start) ~/notes/NAME.typ; NAME can be a/b, or end in .md
+#   notes -p NAME             show it: the PDF for Typst, Peek for Markdown
+#   notes template            list the templates (* = the one ~/notes uses)
+#   notes template NAME       switch ~/notes to that template (every note follows)
+#   notes template --preview  render a sample note with each template, to compare
+#   notes pdfs                build every note to PDF daily on GitHub (once per notes repo)
+#   notes sync                sync now
+#   notes --clone             clone your notes repo to ~/notes if it isn't there
 # The repo is <your gh user>/notes (offered to be made, private, if you don't have one yet).
 # NOTES_REPO (owner/repo or a git URL) and NOTES_DIR (default ~/notes) override.
 set -u
 dir=${NOTES_DIR:-$HOME/notes}
+templates=${XDG_DATA_HOME:-$HOME/.local/share}/notes/templates
+workflow=${XDG_DATA_HOME:-$HOME/.local/share}/notes/pdfs.yml
+default_template=classic
 have() { command -v "$1" >/dev/null 2>&1; }
 gh_ok() { have gh && gh auth status >/dev/null 2>&1; }
 
@@ -64,14 +71,115 @@ edit() {
   fi
 }
 
+# NAME -> its file: NAME.typ, unless it says .md or only a NAME.md exists
 file_for() {
-  case $1 in *.md) echo "$dir/$1" ;; *) echo "$dir/$1.md" ;; esac
+  case $1 in
+    *.md|*.typ) echo "$dir/$1" ;;
+    *) if [ -e "$dir/$1.md" ] && [ ! -e "$dir/$1.typ" ]; then echo "$dir/$1.md"
+       else echo "$dir/$1.typ"; fi ;;
+  esac
+}
+
+template_names() {
+  for t in "$templates"/*.typ; do
+    t=${t##*/}
+    [ "$t" = sample.typ ] || echo "${t%.typ}"
+  done
+}
+
+# Notes import ~/notes/template.typ, a copy of one of the templates (committed, so every
+# machine renders notes the same way)
+use_template() {
+  [ -f "$templates/$1.typ" ] || {
+    echo "notes: no template '$1' (have: $(echo $(template_names)))" >&2
+    return 1
+  }
+  cp "$templates/$1.typ" "$dir/template.typ"
+}
+
+templates_cmd() {
+  [ -d "$templates" ] || { echo "notes: no templates in $templates (./install.sh notes)" >&2; exit 1; }
+  case ${1:-} in
+    '')
+      current=
+      for t in $(template_names); do
+        if cmp -s "$templates/$t.typ" "$dir/template.typ" 2>/dev/null; then echo "* $t"; current=$t
+        else echo "  $t"; fi
+      done
+      if [ -z "$current" ] && [ -f "$dir/template.typ" ]; then
+        echo "(~/notes/template.typ is your own edited copy)"
+      fi ;;
+    --preview)
+      have typst || { echo "notes: previews need the typst CLI" >&2; exit 1; }
+      out=${TMPDIR:-/tmp}/notes-templates
+      rm -rf "$out"
+      for t in $(template_names); do
+        mkdir -p "$out/$t"
+        cp "$templates/$t.typ" "$out/$t/template.typ"
+        cp "$templates/sample.typ" "$out/$t/sample.typ"
+        typst compile "$out/$t/sample.typ" "$out/$t.pdf" || continue
+        echo "$out/$t.pdf"
+        open_pdf "$out/$t.pdf"
+      done ;;
+    *)
+      clone || exit 1
+      use_template "$1" || exit 1
+      echo "notes: now using $1 (saved as ~/notes/template.typ, synced to your other machines)" ;;
+  esac
+}
+
+# Add (or update) the GitHub Action that publishes PDFs of every note, then sync right away
+# so a rejected push shows up here rather than stalling the background sync
+pdfs_cmd() {
+  [ -f "$workflow" ] || { echo "notes: no $workflow (./install.sh notes)" >&2; exit 1; }
+  clone || exit 1
+  dest=$dir/.github/workflows/pdfs.yml
+  if cmp -s "$workflow" "$dest"; then
+    echo "notes: the PDF workflow is already in place"
+  else
+    # pushing a workflow over https needs gh's `workflow` scope
+    case $(git -C "$dir" remote get-url origin 2>/dev/null) in
+      https://*)
+        if have gh && ! gh auth status 2>&1 | grep -q "'workflow'"; then
+          echo "notes: pushing a workflow needs more GitHub access. Run this, then \`notes pdfs\` again:" >&2
+          echo "  gh auth refresh -h github.com -s workflow" >&2
+          exit 1
+        fi ;;
+    esac
+    mkdir -p "$(dirname "$dest")"
+    cp "$workflow" "$dest"
+    notes-sync || exit 1
+    echo "notes: PDFs build daily (or: Actions tab -> PDFs -> Run workflow)"
+  fi
+  url=$(git -C "$dir" remote get-url origin | sed 's|^git@github.com:|https://github.com/|; s|\.git$||')
+  echo "  read them at $url/releases/latest"
+}
+
+open_pdf() {
+  if have pdfview; then pdfview "$1"
+  elif [ "$(uname)" = Darwin ]; then open "$1"
+  else nohup xdg-open "$1" >/dev/null 2>&1 &
+  fi
+}
+
+# Start a Typst note: import the template (relative, so it compiles from any folder),
+# set the title, and keep the built PDFs out of git
+start_typ() { # start_typ FILE NAME
+  [ -e "$1" ] && return 0
+  [ -f "$dir/template.typ" ] || use_template "$default_template" || return 1
+  up=$(dirname "$2" | awk -F/ '$0 == "." { print ""; next } { s = ""; for (i = 1; i <= NF; i++) s = s "../"; print s }')
+  title=$(basename "${2%.typ}" | tr '_-' '  ' | tr -d '"\\')
+  printf '#import "%stemplate.typ": *\n#show: note.with(title: "%s", date: "%s")\n\n' \
+    "$up" "$title" "$(date +%Y-%m-%d)" > "$1"
+  grep -qx '\*.pdf' "$dir/.gitignore" 2>/dev/null || echo '*.pdf' >> "$dir/.gitignore"
 }
 
 case ${1:-} in
-  -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
   --clone) clone; exit ;;
   sync) clone && exec notes-sync ;;
+  template|templates) shift; templates_cmd "$@"; exit ;;
+  pdfs) pdfs_cmd; exit ;;
 esac
 
 clone || exit 1
@@ -84,9 +192,16 @@ case ${1:-} in
     [ $# -ge 2 ] || { echo "usage: notes -p NAME" >&2; exit 2; }
     f=$(file_for "$2")
     [ -e "$f" ] || { echo "notes: no $f" >&2; exit 1; }
-    peek "$f" ;;
+    case $f in
+      *.typ)
+        # Zed builds the PDF on save; build it here too in case it hasn't yet
+        have typst && { typst compile --root "$dir" "$f" "${f%.typ}.pdf" || exit 1; }
+        open_pdf "${f%.typ}.pdf" ;;
+      *) peek "$f" ;;
+    esac ;;
   *)
     f=$(file_for "$1")
     mkdir -p "$(dirname "$f")"
+    case $f in *.typ) start_typ "$f" "${f#"$dir"/}" || exit 1 ;; esac
     edit "$dir" "$f" ;;
 esac

@@ -1,0 +1,69 @@
+# Build every note to PDF and publish them on the `latest` release, so they can be read
+# from anywhere (github.com/<you>/notes/releases/latest, or the GitHub app).
+# Runs daily (skipped when nothing changed since the last build) and from the Actions tab
+# ("Run workflow"). Added by `notes pdfs` from the dotfiles notes package: change it there.
+name: PDFs
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pdfs
+  cancel-in-progress: true
+
+env:
+  TYPST_VERSION: "0.15.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if nothing changed since the last build
+        id: check
+        run: |
+          built=$(gh release view latest --json body --jq .body 2>/dev/null | sed -n 's/^Built from \([0-9a-f]*\).*/\1/p')
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$built" = "$GITHUB_SHA" ]; then
+            echo "Already built $GITHUB_SHA"
+            echo skip=1 >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Typst
+        if: steps.check.outputs.skip != '1'
+        run: |
+          curl -fsSL "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/typst-x86_64-unknown-linux-musl.tar.xz" | tar -xJ
+          echo "$PWD/typst-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
+      - name: Compile notes
+        if: steps.check.outputs.skip != '1'
+        run: |
+          mkdir -p "$RUNNER_TEMP/pdf"
+          failed=0
+          while IFS= read -r f; do
+            # maths/groups.typ -> maths-groups.pdf
+            name=$(printf '%s' "${f#./}" | sed 's/\.typ$//; s|/|-|g')
+            typst compile --root . "$f" "$RUNNER_TEMP/pdf/$name.pdf" || { echo "::error file=$f::failed to compile"; failed=1; }
+          done < <(find . -name '*.typ' ! -name template.typ ! -path './.git/*' ! -path './typst-*' | sort)
+          echo "failed=$failed" >> "$GITHUB_ENV"
+
+      - name: Publish the latest release
+        if: steps.check.outputs.skip != '1'
+        run: |
+          shopt -s nullglob
+          pdfs=("$RUNNER_TEMP"/pdf/*.pdf)
+          if [ ${#pdfs[@]} -eq 0 ]; then echo "No notes to publish"; exit "$failed"; fi
+          # recreated each time, so deleted notes disappear and only one set is stored
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest "${pdfs[@]}" --target "$GITHUB_SHA" --title "Notes (PDF)" \
+            --notes "Built from $GITHUB_SHA on $(date -u +%Y-%m-%d)."
+          # a note that didn't compile fails the run (GitHub emails you); the rest still publish
+          exit "$failed"

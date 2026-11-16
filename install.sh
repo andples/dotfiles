@@ -35,9 +35,9 @@ run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Tools the configs use. Everything works without them, minus that feature.
-TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard tmux"
+TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard tmux typst"
 # Tools mise can install into $HOME without admin rights
-MISE_TOOLS="nvim fzf zoxide eza bat starship direnv uv"
+MISE_TOOLS="nvim fzf zoxide eza bat starship direnv uv typst"
 
 installed() {
   case $1 in
@@ -58,7 +58,7 @@ pkg_name() {
   case "$1:$2" in
     nvim:*)                  echo neovim ;;
     python3:brew|python3:pacman) echo python ;;
-    starship:apt|uv:apt|uv:zypper) ;;
+    starship:apt|uv:apt|uv:zypper|typst:apt|typst:dnf) ;;
     clipboard:*)             if [ -n "$WAYLAND_DISPLAY" ]; then echo wl-clipboard; else echo xclip; fi ;;
     *)                       echo "$1" ;;
   esac
@@ -378,7 +378,8 @@ zsh|any||~/.zshrc
 nvim|any||minimal plugin-free nvim config
 readline|any||~/.inputrc for bash
 zed|any||Zed settings, keys and tasks
-notes|any||~/notes: your own notes repo (<you>/notes on GitHub), synced every 2 minutes
+direnv|any||direnv layout uv: activates the .venv in folders set up by uve
+notes|any||~/notes: Typst notes in your own repo (<you>/notes on GitHub), synced every 2 minutes
 peek|macos|personal|Peek Markdown viewer app (private repo, builds from source)'
 
 pkg_field() { # pkg_field NAME N
@@ -413,6 +414,7 @@ default_packages() {
   if ! omarchy; then d="$d nvim readline"; fi
   # Zed creates this folder on first launch
   if [ -d "$HOME/.config/zed" ]; then d="$d zed"; fi
+  if have direnv; then d="$d direnv"; fi
   echo "$d"
 }
 
@@ -538,7 +540,7 @@ for pkg in "$@"; do
 done
 
 # Remove links to files that are no longer in the repo (e.g. a package that was deleted)
-for dir in "$HOME/.config" "$HOME/.local/bin" "$HOME/.claude" "$HOME/.codex" "$HOME/.pi"; do
+for dir in "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share/notes" "$HOME/.claude" "$HOME/.codex" "$HOME/.pi"; do
   [ -d "$dir" ] || continue
   find "$dir" -type l 2>/dev/null | while IFS= read -r link; do
     case "$(readlink "$link")" in
