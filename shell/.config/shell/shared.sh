@@ -129,14 +129,18 @@ venv() {
   return 1
 }
 
-# set up direnv + uv for this directory
+# set up a uv project here: .venv with ipykernel (for Zed's REPL) + direnv.
+# Run it before opening the folder in Zed so its Python tools find the venv at startup.
+# Safe in an existing project: adds ipykernel and leaves an existing .envrc alone.
 uve() {
-  if [ -f .envrc ]; then
-    echo "Skipping: .envrc already exists here." >&2
-    return 1
+  have uv || { echo "uve: needs uv" >&2; return 1; }
+  [ -f pyproject.toml ] || uv init --bare --quiet || return 1
+  uv add --dev --quiet ipykernel || return 1
+  if [ ! -f .envrc ]; then
+    echo 'layout uv' > .envrc
+    have direnv && direnv allow
   fi
-  echo 'layout uv' > .envrc
-  direnv allow
+  echo "✅ .venv ready (with ipykernel)"
 }
 
 # copy stdin to the clipboard: echo hi | pb
