@@ -49,6 +49,35 @@ src=${XDG_DATA_HOME:-$HOME/.local/share}/localview/LocalView.swift
 app=${XDG_CACHE_HOME:-$HOME/.cache}/localview/LocalView.app
 bin=$app/Contents/MacOS/LocalView
 
+# Sign LocalView with a self-signed certificate made for it, so macOS sees each rebuild as
+# the same app and keeps its Accessibility access (an unsigned rebuild loses it). The
+# certificate lives in its own keychain, with a fixed password since it guards nothing
+# but this; delete the keychain to start over.
+sign_app() {
+  kc=$HOME/Library/Keychains/localview.keychain-db pass=localview name="LocalView (local)"
+  if ! security find-certificate -c "$name" "$kc" >/dev/null 2>&1; then
+    tmp=$(mktemp -d) || return 1
+    printf '%s\n' '[req]' 'distinguished_name = dn' 'x509_extensions = ext' 'prompt = no' \
+      '[dn]' "CN = $name" '[ext]' 'basicConstraints = critical,CA:false' \
+      'keyUsage = critical,digitalSignature' 'extendedKeyUsage = critical,codeSigning' > "$tmp/cfg"
+    # macOS's own openssl: its .p12 files are ones `security` can read
+    /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -days 7300 -config "$tmp/cfg" \
+        -keyout "$tmp/key.pem" -out "$tmp/cert.pem" 2>/dev/null &&
+      /usr/bin/openssl pkcs12 -export -inkey "$tmp/key.pem" -in "$tmp/cert.pem" \
+        -out "$tmp/id.p12" -passout "pass:$pass" &&
+      { [ -f "$kc" ] || security create-keychain -p "$pass" "$kc"; } &&
+      security set-keychain-settings "$kc" &&
+      security unlock-keychain -p "$pass" "$kc" &&
+      security import "$tmp/id.p12" -k "$kc" -P "$pass" -T /usr/bin/codesign >/dev/null &&
+      security set-key-partition-list -S apple-tool:,apple: -s -k "$pass" "$kc" >/dev/null
+    status=$?
+    rm -rf "$tmp"
+    [ "$status" -eq 0 ] || return 1
+  fi
+  security unlock-keychain -p "$pass" "$kc" &&
+    codesign --force --keychain "$kc" -s "$name" "$app" 2>/dev/null
+}
+
 # Already showing: LocalView closes (widening Zed back) if this is its Zed window, or
 # moves to this one if it isn't
 if pgrep -qf "$bin"; then
@@ -59,7 +88,7 @@ fi
 # Build LocalView.app when it's missing or its source changed
 if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
   have swiftc || pdf_instead "building the preview window needs Swift (xcode-select --install)"
-  echo "typview: building LocalView (macOS asks again for its Accessibility access after a rebuild)"
+  echo "typview: building LocalView"
   mkdir -p "$app/Contents/MacOS"
   cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -78,6 +107,7 @@ if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
 </plist>
 PLIST
   swiftc -O -o "$bin" "$src" || pdf_instead "building the preview window failed"
+  sign_app || echo "typview: couldn't sign LocalView: macOS asks for its Accessibility access again" >&2
 fi
 
 # LocalView places itself beside Zed, on launch and when opened again. -g: Zed keeps focus
