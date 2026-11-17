@@ -29,6 +29,26 @@ esac
 # so opam doesn't append this to the linked rc files itself.
 [ -r "$HOME/.opam/opam-init/variables.sh" ] && . "$HOME/.opam/opam-init/variables.sh"
 
+# nvm, if installed: its default Node goes on PATH now, and nvm itself loads the first time
+# you run `nvm` (loading it in every shell took over half a second)
+export NVM_DIR=${NVM_DIR:-$HOME/.nvm}
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  _nvm_want=
+  [ -r "$NVM_DIR/alias/default" ] && read -r _nvm_want < "$NVM_DIR/alias/default"
+  # the newest installed version matching the default alias (26, 26.5.0, v26...); for
+  # anything else (node, lts/*, none) the newest installed
+  _nvm_bin=$(ls "$NVM_DIR/versions/node" 2>/dev/null | sort -t. -k1.2,1n -k2,2n -k3,3n | awk -v w="${_nvm_want#v}" '
+    { v = substr($0, 2) } w ~ /^[0-9]/ && v != w && index(v, w ".") != 1 { next } { last = $0 } END { print last }')
+  [ -n "$_nvm_bin" ] && [ -d "$NVM_DIR/versions/node/$_nvm_bin/bin" ] &&
+    export PATH="$NVM_DIR/versions/node/$_nvm_bin/bin:$PATH"
+  unset _nvm_want _nvm_bin
+  nvm() {
+    unset -f nvm
+    . "$NVM_DIR/nvm.sh"
+    nvm "$@"
+  }
+fi
+
 # --- Things Omarchy already sets up; only do them elsewhere ---
 if [ -z "$OMARCHY_PATH" ]; then
   # mise: user-level tool installs (no admin needed), see install.sh

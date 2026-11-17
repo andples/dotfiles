@@ -37,9 +37,6 @@ t() { tree -L "${1:-2}"; }
 
 alias cc='cd ~/claude-scratch && claude'
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-
 # Aliases, functions and tool setup shared with bash. It loads this machine's
 # private ~/.config/shell/local.sh and secrets.sh last, so they can override anything.
 [ -f ~/.config/shell/shared.sh ] && source ~/.config/shell/shared.sh
