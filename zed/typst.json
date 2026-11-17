@@ -8,6 +8,8 @@
   },
   "lsp": {
     "tinymist": {
+      // tinymist-follow (in bin) runs tinymist and scrolls the preview to each edit
+      "binary": { "path": "~/.local/bin/tinymist-follow", "arguments": ["lsp"] },
       // live preview served at http://127.0.0.1:23635 (VS Code's side pane, in a browser
       // window): updates as you type, click to jump between preview and source
       "initialization_options": {

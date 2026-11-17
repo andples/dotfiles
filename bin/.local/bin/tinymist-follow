@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Run tinymist (Typst's language server) for Zed, and make its live preview follow your edits.
+
+Zed starts this instead of tinymist (lsp.tinymist.binary in zed/typst.json). Every message
+passes through unchanged; after each edit, once typing pauses for a moment, it also asks
+tinymist to scroll the preview to the edited spot (`tinymist.scrollPreview`). Zed has no
+way to ask for that itself.
+
+  tinymist-follow lsp      what Zed runs; any arguments go to tinymist
+
+The real tinymist: $TINYMIST (a path), else the newest one Zed's Typst extension
+downloaded, else `tinymist` on PATH.
+"""
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+
+PAUSE = 0.3  # seconds of no edits before scrolling
+LOG = os.environ.get("TINYMIST_FOLLOW_LOG")  # a file to log the scroll requests and replies to
+
+
+def log(*parts):
+    if LOG:
+        with open(LOG, "a") as f:
+            f.write(time.strftime("%X ") + " ".join(str(p) for p in parts) + "\n")
+TASK = "default_preview"  # tinymist's name for the preview Zed's settings start
+
+
+def find_tinymist():
+    if os.environ.get("TINYMIST"):
+        return os.environ["TINYMIST"]
+    data = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))
+    dirs = [
+        os.path.expanduser("~/Library/Application Support/Zed/extensions/work/typst"),
+        os.path.join(data, "zed/extensions/work/typst"),
+    ]
+    found = [p for d in dirs for p in glob.glob(os.path.join(d, "tinymist-*/tinymist"))]
+    if found:
+        return max(found, key=os.path.getmtime)
+    return shutil.which("tinymist")
+
+
+def read_message(stream):
+    """One LSP message: (raw bytes including headers, parsed JSON or None). None at EOF."""
+    headers = b""
+    while not headers.endswith(b"\r\n\r\n"):
+        byte = stream.read(1)
+        if not byte:
+            return None
+        headers += byte
+    length = 0
+    for line in headers.split(b"\r\n"):
+        if line.lower().startswith(b"content-length:"):
+            length = int(line.split(b":", 1)[1])
+    body = stream.read(length)
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    return headers + body, parsed
+
+
+def frame(message):
+    body = json.dumps(message).encode()
+    return b"Content-Length: %d\r\n\r\n" % len(body) + body
+
+
+def main():
+    real = find_tinymist()
+    if not real:
+        sys.exit("tinymist-follow: can't find tinymist (open a .typ file in Zed once, or set TINYMIST)")
+    server = subprocess.Popen([real] + sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    to_server = threading.Lock()
+    pending = {"pos": None, "due": 0.0}
+    wake = threading.Condition()
+    count = [0]
+
+    def send_to_server(raw):
+        with to_server:
+            server.stdin.write(raw)
+            server.stdin.flush()
+
+    def from_zed():
+        while True:
+            msg = read_message(sys.stdin.buffer)
+            if msg is None:
+                break
+            raw, parsed = msg
+            send_to_server(raw)
+            if parsed and parsed.get("method") == "textDocument/didChange":
+                params = parsed.get("params", {})
+                changes = [c for c in params.get("contentChanges", []) if "range" in c]
+                if changes:
+                    # where the cursor ends up: after the inserted text (a spot at the very
+                    # start of a line often has no text in the preview to scroll to)
+                    start, text = changes[-1]["range"]["start"], changes[-1].get("text", "")
+                    line = start["line"] + text.count("\n")
+                    char = len(text.rsplit("\n", 1)[-1]) + (start["character"] if "\n" not in text else 0)
+                    path = urllib.parse.unquote(urllib.parse.urlparse(params["textDocument"]["uri"]).path)
+                    with wake:
+                        pending["pos"] = (path, line, max(char, 1))
+                        pending["due"] = time.monotonic() + PAUSE
+                        wake.notify()
+        try:
+            server.stdin.close()
+        except OSError:
+            pass
+
+    def follower():
+        while True:
+            with wake:
+                while pending["pos"] is None or time.monotonic() < pending["due"]:
+                    wait = None if pending["pos"] is None else pending["due"] - time.monotonic()
+                    wake.wait(wait)
+                path, line, char = pending["pos"]
+                pending["pos"] = None
+            count[0] += 1
+            log("scroll to", path, line, char)
+            send_to_server(frame({
+                "jsonrpc": "2.0",
+                "id": "follow-%d" % count[0],
+                "method": "workspace/executeCommand",
+                "params": {
+                    "command": "tinymist.scrollPreview",
+                    "arguments": [TASK, {"event": "panelScrollTo", "filepath": path, "line": line, "character": char}],
+                },
+            }))
+
+    def from_server():
+        out = sys.stdout.buffer
+        while True:
+            msg = read_message(server.stdout)
+            if msg is None:
+                break
+            raw, parsed = msg
+            # replies to our own scroll requests aren't Zed's business
+            if parsed and "method" not in parsed and str(parsed.get("id", "")).startswith("follow-"):
+                log("reply", json.dumps(parsed)[:300])
+                continue
+            out.write(raw)
+            out.flush()
+
+    threading.Thread(target=from_zed, daemon=True).start()
+    threading.Thread(target=follower, daemon=True).start()
+    from_server()
+    sys.exit(server.wait())
+
+
+if __name__ == "__main__":
+    main()
