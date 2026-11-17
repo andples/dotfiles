@@ -84,8 +84,16 @@
     }
   },
   {
-    "context": "Editor && vim_mode == normal && !menu && (extension == tex || extension == typ)",
+    "context": "Editor && vim_mode == normal && !menu && extension == tex",
     "bindings": { "space p": ["task::Spawn", { "task_name": "View PDF" }] }
+  },
+  {
+    // Typst: live preview beside Zed; space P: the saved PDF
+    "context": "Editor && vim_mode == normal && !menu && extension == typ",
+    "bindings": {
+      "space p": ["task::Spawn", { "task_name": "Typst: live preview" }],
+      "space P": ["task::Spawn", { "task_name": "View PDF" }]
+    }
   },
 
   // ── From any mode ──────────────────────────────────────────────────

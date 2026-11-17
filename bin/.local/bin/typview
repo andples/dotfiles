@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Show tinymist's live Typst preview beside the editor: it updates as you type, and
+# clicking in it moves the cursor in Zed. Zed's Typst extension serves it (the
+# background preview in zed/typst.json) once a .typ file is open.
+#
+#   typview          open the preview (again: bring it back without moving windows)
+#
+# macOS: a Safari window on the right half of Zed's window, Zed on the left half
+# (moving Zed's window needs Zed in System Settings > Privacy > Accessibility).
+# Linux: the default browser (Omarchy's tiling puts it beside Zed).
+set -u
+url=${TYPVIEW_URL:-http://127.0.0.1:23635}
+
+if ! curl -s -o /dev/null --max-time 2 "$url"; then
+  echo "typview: no preview at $url: open a .typ file in Zed first" >&2
+  echo "  (it needs the background preview from zed/typst.json: ./install.sh zed)" >&2
+  exit 1
+fi
+
+if [ "$(uname)" != Darwin ]; then
+  nohup xdg-open "$url" >/dev/null 2>&1 &
+  exit 0
+fi
+
+# Split Zed's front window: Zed keeps the left half, the preview gets the right
+osascript - "$url" <<'OSA'
+on run argv
+  set u to item 1 of argv
+  -- already open: just bring it back, keeping however the windows were arranged
+  if my previewWindow(u) is not missing value then
+    tell application "Safari"
+      set index of my previewWindow(u) to 1
+      activate
+    end tell
+    tell application "Zed" to activate
+    return ""
+  end if
+  set zx to missing value
+  try
+    tell application "System Events" to tell process "Zed"
+      set {zx, zy} to position of front window
+      set {zw, zh} to size of front window
+    end tell
+  end try
+
+  tell application "Safari"
+    set w to my previewWindow(u)
+    if w is missing value then
+      make new document with properties {URL:u}
+      -- a freshly launched Safari may also open its start page, so look it up again
+      set w to my previewWindow(u)
+    end if
+    if zx is not missing value then
+      set half to zw div 2
+      set bounds of w to {zx + half, zy, zx + zw, zy + zh}
+    end if
+  end tell
+
+  if zx is not missing value then
+    tell application "System Events" to tell process "Zed"
+      set size of front window to {zw div 2, zh}
+    end tell
+  else
+    tell application "Safari" to activate
+    return "typview: give Zed Accessibility access (System Settings > Privacy) to place the windows side by side"
+  end if
+  tell application "Zed" to activate
+  return ""
+end run
+
+on previewWindow(u)
+  tell application "Safari"
+    repeat with candidate in windows
+      try
+        if URL of current tab of candidate starts with u then return contents of candidate
+      end try
+    end repeat
+  end tell
+  return missing value
+end previewWindow
+OSA

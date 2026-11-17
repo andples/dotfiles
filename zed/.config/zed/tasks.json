@@ -22,9 +22,11 @@
     "hide": "on_success"
   },
   {
-    "label": "Typst: live preview in browser (click to jump)",
-    "command": "tinymist preview \"$ZED_FILE\"",
-    "reveal": "no_focus"
+    // live preview beside Zed (typview, in bin): updates as you type, click to jump
+    "label": "Typst: live preview",
+    "command": "typview",
+    "reveal": "never",
+    "hide": "on_success"
   },
 
   // ── Projects ──────────────────────────────────────────────────

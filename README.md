@@ -65,7 +65,7 @@ Markdown. Language servers are downloaded by Zed itself; the toolchains are your
 
 | Key (vim normal mode) | Does |
 |---|---|
-| `space p` | Markdown: pop it up formatted in [Peek](#peek) (`space P`: Zed's preview beside the file). LaTeX/Typst: open the PDF (LaTeX jumps to the cursor) |
+| `space p` | Markdown: pop it up formatted in [Peek](#peek) (`space P`: Zed's preview beside the file). LaTeX: open the PDF at the cursor. Typst: live preview beside Zed, click to jump (`space P`: the PDF) |
 | `space r` / `space R` | re-run last task / pick a task (run file, tests, builds…) |
 | `space t` | run the test or `main` at the cursor |
 | `space o` / `space O` / `space z` | recent projects / open any folder (Zed's fuzzy picker, not the macOS dialog) / folder picker (same as `proj`: frequent folders, repos, or type a path) |
@@ -77,8 +77,10 @@ LaTeX builds with latexmk on every save and the PDF follows the cursor. PDFs ope
 `pdfview` (in `bin`): Skim on macOS, Zathura on Linux; both reload on change. For the jump
 back from the PDF (Cmd-Shift-click in Skim), set Skim → Settings → Sync → Preset: Custom,
 Command: `/Applications/Zed.app/Contents/MacOS/cli`, Arguments: `"%file":%line`.
-Typst writes its PDF on save; for a live browser preview with click-to-jump, install
-`tinymist` and run the "Typst: live preview" task.
+Typst writes its PDF on save. `space p` opens tinymist's live preview (what VS Code shows in
+its side pane) through `typview`: it updates as you type, and clicking in it moves the
+cursor. On macOS it's a Safari window on the right half of Zed's window (placing Zed needs
+Zed in System Settings → Privacy → Accessibility); on Linux the default browser.
 
 ### Peek
 
