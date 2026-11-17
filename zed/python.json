@@ -12,5 +12,11 @@
         { "language_server": { "name": "ruff" } }
       ]
     }
+  },
+  "lsp": {
+    "ty": {
+      // completions only offer names already in scope: accepting one never adds an import
+      "settings": { "completions": { "autoImport": false } }
+    }
   }
 }
