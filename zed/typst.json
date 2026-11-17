@@ -13,7 +13,13 @@
         "preview": {
           "background": {
             "enabled": true,
-            "args": ["--data-plane-host=127.0.0.1:23635", "--invert-colors=never"]
+            // partial rendering: only pages in view are drawn (VS Code's default), which keeps
+            // long documents (100+ pages) responsive
+            "args": [
+              "--data-plane-host=127.0.0.1:23635",
+              "--invert-colors=never",
+              "--partial-rendering=true"
+            ]
           }
         }
       },
