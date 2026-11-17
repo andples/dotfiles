@@ -4,13 +4,15 @@
 //
 //   LocalView URL
 //
-// It belongs to Zed: it floats beside Zed's window only while Zed is the active app with
-// a .typ file in front, and hides otherwise. Clicking it doesn't take focus from Zed, so
+// It belongs to the Zed window it was opened from: it floats beside that window only while
+// Zed is the active app, that window is in front, and its active tab is a .typ file. Other
+// Zed windows, other tabs and other apps hide it. Clicking it doesn't take focus from Zed, so
 // click-to-jump lands you back in the editor. It quits after a minute of Zed showing
 // other files (you closed the Typst file), when Zed quits, or when the preview server is
 // gone for 10 seconds.
 //
-// On launch (and each `typview`) it splits Zed's front window: Zed keeps the left half,
+// `typview` again (SIGUSR1): from the same window it closes; from another Zed window it
+// moves there. On launch it splits Zed's front window: Zed keeps the left half,
 // the pane takes the right. If Zed's window is already narrow, the pane fills the space
 // beside it instead. Needs LocalView in System Settings > Privacy > Accessibility (asked
 // once) to see and resize Zed's window.
@@ -79,7 +81,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   var besideZed: AXUIElement?  // the Zed window the pane sits beside, widened again on close
   var status: NSStatusItem!
   var live = true
-  var sigterm: DispatchSourceSignal?
+  var signals: [DispatchSourceSignal] = []
 
   func applicationDidFinishLaunching(_ note: Notification) {
     _ = AXIsProcessTrustedWithOptions(
@@ -114,11 +116,14 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     showLive(true)
     web.load(URLRequest(url: target))
 
-    // `typview` again sends SIGTERM: close properly, widening Zed back
-    signal(SIGTERM, SIG_IGN)
-    sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-    sigterm?.setEventHandler { NSApp.terminate(nil) }
-    sigterm?.resume()
+    // SIGTERM: close properly, widening Zed back. SIGUSR1 (`typview` again): toggle.
+    for (sig, handler) in [(SIGTERM, { NSApp.terminate(nil) }), (SIGUSR1, { [unowned self] in self.toggle() })] {
+      signal(sig, SIG_IGN)
+      let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+      src.setEventHandler(handler: handler)
+      src.resume()
+      signals.append(src)
+    }
 
     layout()
     update()
@@ -135,6 +140,17 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     // Zed's tab changes have no notification: a cheap title check twice a second
     Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [unowned self] _ in self.update() }
     Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in self.checkServer() }
+  }
+
+  // `space p` again: close from the window it belongs to, move to any other Zed window
+  func toggle() {
+    if let mine = besideZed, let front = zedWindow(), !CFEqual(mine, front) {
+      applicationWillTerminate(Notification(name: .init("move")))  // widen the old window back
+      layout()
+      update()
+    } else {
+      NSApp.terminate(nil)
+    }
   }
 
   // `typview` again (open -a on the running app): place the pane beside Zed once more
@@ -193,8 +209,13 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     if !placedBesideZed && AXIsProcessTrusted() { layout() }
     let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let zedActive = front == zedID || front == Bundle.main.bundleIdentifier
-    // without Accessibility we can't see the file: assume Typst
-    let typst = zedWindow().flatMap(axTitle).map { $0.hasSuffix(".typ") } ?? true
+    // the window it belongs to is in front, on a Typst tab (without Accessibility we can't
+    // tell: assume yes)
+    var typst = true
+    if let front = zedWindow() {
+      let mine = besideZed.map { CFEqual($0, front) } ?? true
+      typst = mine && (axTitle(front)?.hasSuffix(".typ") ?? false)
+    }
 
     if zedActive && typst {
       if !pane.isVisible { pane.orderFrontRegardless() }
