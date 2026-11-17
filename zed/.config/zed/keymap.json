@@ -96,10 +96,11 @@
     }
   },
 
-  // Typst/LaTeX: long lines wrap to the window (any width or zoom), so j/k move by the
-  // lines you see; gj/gk move by real lines. dd, yy etc. still act on real lines.
+  // Prose files (Typst, LaTeX, Markdown): long lines wrap to the window (any width or zoom),
+  // so j/k move by the lines you see, matching the relative numbers ("wrapped" in
+  // editor.json); gj/gk move by real lines. dd, yy etc. still act on real lines.
   {
-    "context": "Editor && (vim_mode == normal || vim_mode == visual) && !menu && (extension == typ || extension == tex)",
+    "context": "Editor && (vim_mode == normal || vim_mode == visual) && !menu && (extension == typ || extension == tex || extension == md)",
     "bindings": {
       "j": ["vim::Down", { "display_lines": true }],
       "k": ["vim::Up", { "display_lines": true }],

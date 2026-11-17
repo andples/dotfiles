@@ -1,7 +1,8 @@
 // General editor behaviour: vim, inlay hints, format on save, no AI/telemetry.
 {
   "vim_mode": true,
-  "relative_line_numbers": "enabled",
+  // "wrapped": relative numbers count wrapped lines, matching j/k in wrapped files
+  "relative_line_numbers": "wrapped",
   "vertical_scroll_margin": 5,
   "cursor_blink": false,
   "show_whitespaces": "selection",
