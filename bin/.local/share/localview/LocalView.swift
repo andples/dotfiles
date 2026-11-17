@@ -118,6 +118,9 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     let reload = NSMenuItem(title: "Reload Preview", action: #selector(reloadPreview), keyEquivalent: "")
     reload.target = self
     menu.addItem(reload)
+    let debug = NSMenuItem(title: "Save Debug Info", action: #selector(saveDebugInfo), keyEquivalent: "")
+    debug.target = self
+    menu.addItem(debug)
     menu.addItem(NSMenuItem(title: "Close Preview", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
     status.menu = menu
     showLive(true)
@@ -198,6 +201,43 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
   @objc func reloadPreview() { web.reload() }
 
+  // The preview occasionally starts with a page drawn unscaled over the first one, until
+  // its next re-render. A resize event makes it re-render and fit the pages to the pane:
+  // sent after loading and whenever the pane appears.
+  func nudgeRender() {
+    web.evaluateJavaScript("[100, 500, 1500].forEach((t) => setTimeout(() => dispatchEvent(new Event('resize')), t))")
+  }
+
+  // What the preview's page is made of right now, for chasing rendering glitches
+  @objc func saveDebugInfo() {
+    let js = """
+      (() => {
+        const out = [`window ${innerWidth}x${innerHeight} dpr ${devicePixelRatio}`,
+          `scroll ${document.getElementById('typst-container-main')?.scrollTop}`];
+        const walk = (el, depth) => {
+          if (depth > 4) return;
+          const r = el.getBoundingClientRect();
+          const attrs = ['transform', 'width', 'height', 'viewBox', 'data-width', 'data-height', 'style']
+            .map((a) => el.getAttribute && el.getAttribute(a) ? `${a}=${el.getAttribute(a).slice(0, 80)}` : '')
+            .filter(Boolean).join(' ');
+          out.push(`${'  '.repeat(depth)}<${el.tagName.toLowerCase()} id=${el.id} class=${el.getAttribute('class') || ''}> `
+            + `rect ${r.x|0},${r.y|0} ${r.width|0}x${r.height|0} ${attrs}`);
+          const kids = [...el.children].filter((k) => !['path', 'use', 'text', 'symbol', 'style'].includes(k.tagName.toLowerCase()));
+          kids.slice(0, 12).forEach((k) => walk(k, depth + 1));
+          if (kids.length > 12) out.push(`${'  '.repeat(depth + 1)}... ${kids.length - 12} more`);
+        };
+        walk(document.body, 0);
+        return out.join('\\n');
+      })()
+      """
+    web.evaluateJavaScript(js) { result, error in
+      let text = (result as? String) ?? "error: \(String(describing: error))"
+      let path = NSString(string: "~/Library/Logs/localview-debug.txt").expandingTildeInPath
+      try? (Date().description + "\n" + text + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+      NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+  }
+
   func showLive(_ on: Bool) {
     live = on
     let image = NSImage(
@@ -248,7 +288,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     if zedActive && typst {
-      if !pane.isVisible { pane.orderFrontRegardless() }
+      if !pane.isVisible { pane.orderFrontRegardless(); nudgeRender() }
       keepZedBeside()
     } else if pane.isVisible {
       pane.orderOut(nil)
@@ -382,7 +422,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       "window.__lvColors = ['\(t.bg)', '\(t.fg)']; window.__lvTheme && window.__lvTheme('\(t.bg)', '\(t.fg)')")
   }
 
-  func webView(_ webView: WKWebView, didFinish nav: WKNavigation!) { applyTheme() }
+  func webView(_ webView: WKWebView, didFinish nav: WKNavigation!) { applyTheme(); nudgeRender() }
 
   func webView(_ webView: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { webView.load(URLRequest(url: target)) }
