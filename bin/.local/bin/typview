@@ -5,11 +5,10 @@
 #
 #   typview          open the preview (again: bring it back without moving windows)
 #
-# macOS: LocalView, a borderless viewer built from ~/.local/share/localview/LocalView.swift
-# on first use, on the right half of Zed's window with Zed on the left half. It hides
-# while Zed shows a non-Typst file and quits after a minute of that, or when Zed quits.
-# Moving Zed's window needs Zed, and following it needs LocalView, in System Settings >
-# Privacy > Accessibility.
+# macOS: LocalView, a borderless pane built from ~/.local/share/localview/LocalView.swift
+# on first use. It sits beside Zed's window (splitting it if Zed fills the screen), shows
+# only while Zed is active with a .typ file in front, and quits a minute after you leave
+# Typst or when Zed quits. It needs LocalView in System Settings > Privacy > Accessibility.
 # Linux: a Chromium app window if there is one (no browser controls), else the default
 # browser; Omarchy's tiling puts it beside Zed.
 set -u
@@ -39,7 +38,7 @@ app=${XDG_CACHE_HOME:-$HOME/.cache}/localview/LocalView.app
 bin=$app/Contents/MacOS/LocalView
 if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
   have swiftc || { echo "typview: building the viewer needs Swift (xcode-select --install)" >&2; exit 1; }
-  echo "typview: building LocalView"
+  echo "typview: building LocalView (macOS asks again for its Accessibility access after a rebuild)"
   mkdir -p "$app/Contents/MacOS"
   cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -61,28 +60,5 @@ PLIST
   swiftc -O -o "$bin" "$src" || { echo "typview: building LocalView failed" >&2; exit 1; }
 fi
 
-# Already open: bring it back, keeping however the windows were arranged
-if pgrep -qf "$bin"; then
-  open -a "$app"
-  osascript -e 'tell application "Zed" to activate' >/dev/null 2>&1
-  exit 0
-fi
-
-# Split Zed's front window: Zed keeps the left half, the preview gets the right
-frame=$(osascript -e 'tell application "System Events" to tell process "Zed"
-  set {x, y} to position of front window
-  set {w, h} to size of front window
-  set size of front window to {w div 2, h}
-  return (x as text) & " " & y & " " & w & " " & h
-end tell' 2>/dev/null)
-if [ -n "$frame" ]; then
-  set -- $frame
-  half=$(($3 / 2))
-  open -a "$app" --args "$url" $(($1 + half)) "$2" $(($3 - half)) "$4"
-else
-  echo "typview: give Zed Accessibility access (System Settings > Privacy) to place the windows side by side" >&2
-  open -a "$app" --args "$url"
-fi
-sleep 0.3
-osascript -e 'tell application "Zed" to activate' >/dev/null 2>&1
-exit 0
+# LocalView places itself beside Zed, on launch and when opened again. -g: Zed keeps focus
+open -g -a "$app" --args "$url"
