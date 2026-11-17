@@ -216,11 +216,29 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     axSetWidth(win, z, screen.visibleFrame.maxX - z.minX)
   }
 
+  // Is the frontmost ordinary window Zed's? Menu bar menus, status item popovers, Spotlight
+  // and the like sit above ordinary windows, so opening them (even when it makes their app
+  // active) doesn't hide the pane; focusing another app's window does.
+  func zedWindowInFront() -> Bool {
+    let me = ProcessInfo.processInfo.processIdentifier
+    let zed = zedApp()?.processIdentifier
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                kCGNullWindowID) as? [[String: Any]] else { return true }
+    for w in list {  // front to back
+      guard (w[kCGWindowLayer as String] as? Int) == 0,
+            let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != me else { continue }
+      if let b = w[kCGWindowBounds as String] as? [String: CGFloat], (b["Width"] ?? 0) < 50 || (b["Height"] ?? 0) < 50 {
+        continue  // invisible helper windows
+      }
+      return pid == zed
+    }
+    return false
+  }
+
   func update() {
     // Accessibility granted while running: move beside Zed now
     if !placedBesideZed && AXIsProcessTrusted() { layout() }
-    let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    let zedActive = front == zedID || front == Bundle.main.bundleIdentifier
+    let zedActive = zedWindowInFront()
     // the window it belongs to is in front, on a Typst tab (without Accessibility we can't
     // tell: assume yes)
     var typst = true
