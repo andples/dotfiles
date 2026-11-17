@@ -73,9 +73,6 @@ Markdown. Language servers are downloaded by Zed itself; the toolchains are your
 | `space f` `space /` `space e` `space j` | files, project search, file tree, terminal |
 | `space d` `space a` `space c` `space F` | diagnostics, code actions, rename, format |
 
-Typst and LaTeX prose is rewrapped to 80 columns on save (tinymist; `tex-fmt` for LaTeX), so
-long lines never break vim motions; `gq` rewraps by hand in between.
-
 LaTeX builds with latexmk on every save and the PDF follows the cursor. PDFs open through
 `pdfview` (in `bin`): Skim on macOS, Zathura on Linux; both reload on change. For the jump
 back from the PDF (Cmd-Shift-click in Skim), set Skim → Settings → Sync → Preset: Custom,

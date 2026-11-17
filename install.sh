@@ -35,7 +35,7 @@ run() { if [ -n "$DRY" ]; then echo "  would: $*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # Tools the configs use. Everything works without them, minus that feature.
-TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard tmux typst tex-fmt"
+TOOLS="git nvim fzf zoxide eza bat starship direnv uv tree lsof unzip python3 clipboard tmux typst"
 # Tools mise can install into $HOME without admin rights
 MISE_TOOLS="nvim fzf zoxide eza bat starship direnv uv typst"
 
@@ -58,7 +58,7 @@ pkg_name() {
   case "$1:$2" in
     nvim:*)                  echo neovim ;;
     python3:brew|python3:pacman) echo python ;;
-    starship:apt|uv:apt|uv:zypper|typst:apt|typst:dnf|tex-fmt:apt|tex-fmt:dnf|tex-fmt:zypper) ;;
+    starship:apt|uv:apt|uv:zypper|typst:apt|typst:dnf) ;;
     clipboard:*)             if [ -n "$WAYLAND_DISPLAY" ]; then echo wl-clipboard; else echo xclip; fi ;;
     *)                       echo "$1" ;;
   esac

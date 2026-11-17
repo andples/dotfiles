@@ -1,19 +1,14 @@
 // LaTeX: texlab (downloaded by the latex extension) runs latexmk on every save, then
 // moves the PDF viewer to the cursor line (via `pdfview`: Skim on macOS, Zathura on Linux).
-// Needs a TeX distribution with latexmk (MacTeX / texlive), and tex-fmt for formatting.
+// Needs a TeX distribution with latexmk (MacTeX / texlive).
 {
   "auto_install_extensions": { "latex": true },
   "languages": {
     "LaTeX": {
       "tab_size": 2,
       "soft_wrap": "editor_width",
-      // tex-fmt (fast, unlike latexindent) on save: wraps prose at 80 columns so lines stay
-      // vim-motion friendly, leaves math and comments alone; `gq` rewraps by hand in between
-      "format_on_save": "on",
-      "formatter": { "external": { "command": "tex-fmt", "arguments": ["--stdin", "--wraplen", "80"] } },
-      "preferred_line_length": 80,
-      "wrap_guides": [80],
-      "allow_rewrap": "anywhere"
+      // latexindent is slow and rewrites too much; the build-on-save below is what matters
+      "format_on_save": "off"
     }
   },
   "lsp": {
