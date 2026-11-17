@@ -3,8 +3,11 @@
 # clicking in it moves the cursor in Zed. Zed's Typst extension serves it (the
 # background preview in zed/typst.json) once a .typ file is open.
 #
-#   typview          open the preview; again: close it (Zed gets its width back), or from
-#                    another Zed window, move it there
+#   typview [FILE.typ [LINE]]   open the preview; again: close it (Zed gets its width back),
+#                               or from another Zed window, move it there
+#
+# Without the live preview (its server isn't running, or there's no Swift to build the
+# viewer), it opens FILE's PDF instead with `pdfview` (Skim / Zathura), at LINE.
 #
 # macOS: LocalView, a borderless pane built from ~/.local/share/localview/LocalView.swift
 # on first use. It sits beside Zed's window (splitting it if Zed fills the screen), shows
@@ -14,12 +17,21 @@
 # browser; Omarchy's tiling puts it beside Zed.
 set -u
 url=${TYPVIEW_URL:-http://127.0.0.1:23635}
+file=${1:-} line=${2:-}
 have() { command -v "$1" >/dev/null 2>&1; }
 
-if ! curl -s -o /dev/null --max-time 2 "$url"; then
-  echo "typview: no preview at $url: open a .typ file in Zed first" >&2
-  echo "  (it needs the background preview from zed/typst.json: ./install.sh zed)" >&2
+# The fallback: the saved PDF in the usual viewer
+pdf_instead() {
+  if [ -n "$file" ] && have pdfview; then
+    echo "typview: $1; opening the PDF instead" >&2
+    exec pdfview "${file%.typ}.pdf" "$line" "$file"
+  fi
+  echo "typview: $1" >&2
   exit 1
+}
+
+if ! curl -s -o /dev/null --max-time 2 "$url"; then
+  pdf_instead "no live preview at $url (it needs the background preview from zed/typst.json)"
 fi
 
 if [ "$(uname)" != Darwin ]; then
@@ -46,7 +58,7 @@ fi
 
 # Build LocalView.app when it's missing or its source changed
 if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
-  have swiftc || { echo "typview: building the viewer needs Swift (xcode-select --install)" >&2; exit 1; }
+  have swiftc || pdf_instead "building the preview window needs Swift (xcode-select --install)"
   echo "typview: building LocalView (macOS asks again for its Accessibility access after a rebuild)"
   mkdir -p "$app/Contents/MacOS"
   cat > "$app/Contents/Info.plist" <<'PLIST'
@@ -65,7 +77,7 @@ if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
 </dict>
 </plist>
 PLIST
-  swiftc -O -o "$bin" "$src" || { echo "typview: building LocalView failed" >&2; exit 1; }
+  swiftc -O -o "$bin" "$src" || pdf_instead "building the preview window failed"
 fi
 
 # LocalView places itself beside Zed, on launch and when opened again. -g: Zed keeps focus

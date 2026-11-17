@@ -22,9 +22,10 @@
     "hide": "on_success"
   },
   {
-    // live preview beside Zed (typview, in bin): updates as you type, click to jump
+    // live preview beside Zed (typview, in bin): updates as you type, click to jump.
+    // Without it set up, the PDF instead (like View PDF)
     "label": "Typst: live preview",
-    "command": "typview",
+    "command": "typview \"$ZED_FILE\" \"$ZED_ROW\"",
     "reveal": "never",
     "hide": "on_success"
   },
