@@ -3,7 +3,8 @@
 {
   "auto_install_extensions": { "typst": true },
   "languages": {
-    "Typst": { "tab_size": 2, "soft_wrap": "editor_width" }
+    // long lines wrap to the window; j/k move by wrapped line (keymap.json), `gq` rewraps
+    "Typst": { "tab_size": 2, "soft_wrap": "editor_width", "allow_rewrap": "anywhere" }
   },
   "lsp": {
     "tinymist": {

@@ -96,6 +96,20 @@
     }
   },
 
+  // Typst/LaTeX: long lines wrap to the window (any width or zoom), so j/k move by the
+  // lines you see; gj/gk move by real lines. dd, yy etc. still act on real lines.
+  {
+    "context": "Editor && (vim_mode == normal || vim_mode == visual) && !menu && (extension == typ || extension == tex)",
+    "bindings": {
+      "j": ["vim::Down", { "display_lines": true }],
+      "k": ["vim::Up", { "display_lines": true }],
+      "down": ["vim::Down", { "display_lines": true }],
+      "up": ["vim::Up", { "display_lines": true }],
+      "g j": "vim::Down",
+      "g k": "vim::Up"
+    }
+  },
+
   // ── From any mode ──────────────────────────────────────────────────
   {
     "context": "Editor && extension == md",

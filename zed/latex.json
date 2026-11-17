@@ -6,7 +6,9 @@
   "languages": {
     "LaTeX": {
       "tab_size": 2,
+      // long lines wrap to the window; j/k move by wrapped line (keymap.json), `gq` rewraps
       "soft_wrap": "editor_width",
+      "allow_rewrap": "anywhere",
       // latexindent is slow and rewrites too much; the build-on-save below is what matters
       "format_on_save": "off"
     }
