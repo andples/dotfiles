@@ -21,6 +21,10 @@
 // closes or reloads the preview. Closing it (Cmd-W, `typview` again, or quitting on its own)
 // widens Zed's window back to the edge of the screen.
 //
+// It takes Zed's current theme: the space around the pages and the pages themselves use
+// the theme's editor background and text colours (rechecked every second, so switching
+// theme carries over), and scrolling stops at the edges instead of bouncing into grey.
+//
 // Keys (after clicking the pane): Cmd-R reload, Cmd-+ / Cmd-- / Cmd-0 zoom, Cmd-W close.
 import AppKit
 import WebKit
@@ -101,6 +105,8 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()  // nothing written to disk
+    config.userContentController.addUserScript(
+      WKUserScript(source: themeScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.allowsMagnification = true
@@ -139,7 +145,11 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
     // Zed's tab changes have no notification: a cheap title check twice a second
     Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [unowned self] _ in self.update() }
-    Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in self.checkServer() }
+    Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
+      self.checkServer()
+      self.followTheme()
+    }
+    followTheme()
   }
 
   // `space p` again: close from the window it belongs to, move to any other Zed window
@@ -274,11 +284,118 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   }
 
   // Server not up yet, or restarted: try again shortly
+  // ── Zed's theme ──
+  var theme: (bg: String, fg: String)?
+  var themeStamp = ""
+
+  func followTheme() {
+    let fm = FileManager.default
+    let home = fm.homeDirectoryForCurrentUser.path
+    let settings = home + "/.config/zed/settings.json"
+    let themeDirs = [home + "/.config/zed/themes"]
+      + ((try? fm.contentsOfDirectory(atPath: home + "/Library/Application Support/Zed/extensions/installed")) ?? [])
+      .map { home + "/Library/Application Support/Zed/extensions/installed/" + $0 + "/themes" }
+    let files = [settings] + themeDirs.flatMap { d in
+      ((try? fm.contentsOfDirectory(atPath: d)) ?? []).filter { $0.hasSuffix(".json") }.map { d + "/" + $0 }
+    }
+    let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    // only re-read when a file or the system appearance changed
+    let stamp = files.map { f in
+      "\((try? fm.attributesOfItem(atPath: f)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
+    }.joined(separator: ",") + "\(dark)"
+    if stamp == themeStamp { return }
+    themeStamp = stamp
+
+    var name: String?
+    if let text = try? String(contentsOfFile: settings, encoding: .utf8) {
+      // "theme": "Name"  or  "theme": { "mode": "...", "light": "...", "dark": "..." }
+      if let plain = capture(#""theme"\s*:\s*"([^"]+)""#, text) {
+        name = plain
+      } else if let obj = capture(#""theme"\s*:\s*\{([^}]*)\}"#, text) {
+        let mode = capture(#""mode"\s*:\s*"([^"]+)""#, obj) ?? "system"
+        let key = mode == "dark" || (mode == "system" && dark) ? "dark" : "light"
+        name = capture(#"""# + key + #""\s*:\s*"([^"]+)""#, obj)
+      }
+    }
+    var found: (bg: String, fg: String)?
+    for f in files.dropFirst() {
+      guard let data = fm.contents(atPath: f),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let themes = json["themes"] as? [[String: Any]]
+      else { continue }
+      for t in themes where t["name"] as? String == name {
+        let style = t["style"] as? [String: Any] ?? [:]
+        if let bg = style["editor.background"] as? String,
+          let fg = (style["editor.foreground"] ?? style["text"]) as? String
+        {
+          found = (String(bg.prefix(7)), String(fg.prefix(7)))
+        }
+      }
+    }
+    // a built-in theme (no file to read): plain colours for the system appearance
+    theme = found ?? (dark ? ("#1e1f22", "#d6d6d6") : ("#ffffff", "#1a1a1a"))
+    applyTheme()
+  }
+
+  func applyTheme() {
+    guard let t = theme else { return }
+    pane.backgroundColor = NSColor(hex: t.bg) ?? .windowBackgroundColor
+    web.evaluateJavaScript("window.__lvTheme && window.__lvTheme('\(t.bg)', '\(t.fg)')")
+  }
+
+  func webView(_ webView: WKWebView, didFinish nav: WKNavigation!) { applyTheme() }
+
   func webView(_ webView: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { webView.load(URLRequest(url: target)) }
   }
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
+}
+
+// Recolours the preview: page white becomes the theme background, black the theme text
+// (a per-channel linear map, like the preview's own dark-mode invert but to exact colours)
+let themeScript = """
+window.__lvTheme = function (bg, fg) {
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const [b, f] = [rgb(bg), rgb(fg)];
+  const ns = 'http://www.w3.org/2000/svg';
+  let svg = document.getElementById('lv-defs');
+  if (!svg) {
+    svg = document.createElementNS(ns, 'svg');
+    svg.id = 'lv-defs';
+    svg.setAttribute('style', 'position:absolute;width:0;height:0');
+    svg.innerHTML = '<filter id="lv-theme" color-interpolation-filters="sRGB"><feComponentTransfer>'
+      + '<feFuncR type="linear"/><feFuncG type="linear"/><feFuncB type="linear"/></feComponentTransfer></filter>';
+    document.body.appendChild(svg);
+  }
+  const fns = svg.querySelectorAll('feFuncR, feFuncG, feFuncB');
+  fns.forEach((fn, i) => { fn.setAttribute('slope', b[i] - f[i]); fn.setAttribute('intercept', f[i]); });
+  let st = document.getElementById('lv-style');
+  if (!st) { st = document.createElement('style'); st.id = 'lv-style'; document.head.appendChild(st); }
+  st.textContent = `
+    :root { --typst-preview-background-color: ${bg} !important; }
+    html, body, #typst-container, #typst-container-main, #typst-app { background: ${bg} !important; }
+    html, body, #typst-container-main { overscroll-behavior: none !important; }
+    .typst-doc, canvas { filter: url(#lv-theme); }`;
+};
+"""
+
+// First capture group of a regex match, or nil
+func capture(_ pattern: String, _ text: String) -> String? {
+  guard let re = try? NSRegularExpression(pattern: pattern),
+    let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+    let r = Range(m.range(at: 1), in: text)
+  else { return nil }
+  return String(text[r])
+}
+
+extension NSColor {
+  convenience init?(hex: String) {
+    guard hex.count >= 7, let v = UInt32(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+    self.init(
+      srgbRed: CGFloat((v >> 16) & 0xff) / 255, green: CGFloat((v >> 8) & 0xff) / 255,
+      blue: CGFloat(v & 0xff) / 255, alpha: 1)
+  }
 }
 
 let app = NSApplication.shared
