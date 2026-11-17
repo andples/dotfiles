@@ -540,7 +540,7 @@ for pkg in "$@"; do
 done
 
 # Remove links to files that are no longer in the repo (e.g. a package that was deleted)
-for dir in "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share/notes" "$HOME/.claude" "$HOME/.codex" "$HOME/.pi"; do
+for dir in "$HOME/.config" "$HOME/.local/bin" "$HOME/.local/share/notes" "$HOME/.local/share/localview" "$HOME/.claude" "$HOME/.codex" "$HOME/.pi"; do
   [ -d "$dir" ] || continue
   find "$dir" -type l 2>/dev/null | while IFS= read -r link; do
     case "$(readlink "$link")" in

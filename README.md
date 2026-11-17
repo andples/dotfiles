@@ -79,8 +79,11 @@ back from the PDF (Cmd-Shift-click in Skim), set Skim → Settings → Sync → 
 Command: `/Applications/Zed.app/Contents/MacOS/cli`, Arguments: `"%file":%line`.
 Typst writes its PDF on save. `space p` opens tinymist's live preview (what VS Code shows in
 its side pane) through `typview`: it updates as you type, and clicking in it moves the
-cursor. On macOS it's a Safari window on the right half of Zed's window (placing Zed needs
-Zed in System Settings → Privacy → Accessibility); on Linux the default browser.
+cursor. On macOS it's LocalView, a tiny borderless viewer (built from
+`bin/.local/share/localview/LocalView.swift` on first use, no Dock icon), on the right half of
+Zed's window. It hides while Zed shows a non-Typst file and quits a minute later, or when Zed
+quits. Placing Zed needs Zed, and following it needs LocalView, in System Settings → Privacy →
+Accessibility. On Linux it's a Chromium app window, or the default browser.
 
 ### Peek
 

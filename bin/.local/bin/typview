@@ -5,11 +5,16 @@
 #
 #   typview          open the preview (again: bring it back without moving windows)
 #
-# macOS: a Safari window on the right half of Zed's window, Zed on the left half
-# (moving Zed's window needs Zed in System Settings > Privacy > Accessibility).
-# Linux: the default browser (Omarchy's tiling puts it beside Zed).
+# macOS: LocalView, a borderless viewer built from ~/.local/share/localview/LocalView.swift
+# on first use, on the right half of Zed's window with Zed on the left half. It hides
+# while Zed shows a non-Typst file and quits after a minute of that, or when Zed quits.
+# Moving Zed's window needs Zed, and following it needs LocalView, in System Settings >
+# Privacy > Accessibility.
+# Linux: a Chromium app window if there is one (no browser controls), else the default
+# browser; Omarchy's tiling puts it beside Zed.
 set -u
 url=${TYPVIEW_URL:-http://127.0.0.1:23635}
+have() { command -v "$1" >/dev/null 2>&1; }
 
 if ! curl -s -o /dev/null --max-time 2 "$url"; then
   echo "typview: no preview at $url: open a .typ file in Zed first" >&2
@@ -18,64 +23,66 @@ if ! curl -s -o /dev/null --max-time 2 "$url"; then
 fi
 
 if [ "$(uname)" != Darwin ]; then
+  for b in chromium chromium-browser google-chrome brave; do
+    if have "$b"; then
+      nohup "$b" --app="$url" >/dev/null 2>&1 &
+      exit 0
+    fi
+  done
   nohup xdg-open "$url" >/dev/null 2>&1 &
   exit 0
 fi
 
+# Build LocalView.app when it's missing or its source changed
+src=${XDG_DATA_HOME:-$HOME/.local/share}/localview/LocalView.swift
+app=${XDG_CACHE_HOME:-$HOME/.cache}/localview/LocalView.app
+bin=$app/Contents/MacOS/LocalView
+if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
+  have swiftc || { echo "typview: building the viewer needs Swift (xcode-select --install)" >&2; exit 1; }
+  echo "typview: building LocalView"
+  mkdir -p "$app/Contents/MacOS"
+  cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>LocalView</string>
+  <key>CFBundleIdentifier</key><string>dotfiles.localview</string>
+  <key>CFBundleExecutable</key><string>LocalView</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>
+</plist>
+PLIST
+  pkill -f "$bin" 2>/dev/null
+  swiftc -O -o "$bin" "$src" || { echo "typview: building LocalView failed" >&2; exit 1; }
+fi
+
+# Already open: bring it back, keeping however the windows were arranged
+if pgrep -qf "$bin"; then
+  open -a "$app"
+  osascript -e 'tell application "Zed" to activate' >/dev/null 2>&1
+  exit 0
+fi
+
 # Split Zed's front window: Zed keeps the left half, the preview gets the right
-osascript - "$url" <<'OSA'
-on run argv
-  set u to item 1 of argv
-  -- already open: just bring it back, keeping however the windows were arranged
-  if my previewWindow(u) is not missing value then
-    tell application "Safari"
-      set index of my previewWindow(u) to 1
-      activate
-    end tell
-    tell application "Zed" to activate
-    return ""
-  end if
-  set zx to missing value
-  try
-    tell application "System Events" to tell process "Zed"
-      set {zx, zy} to position of front window
-      set {zw, zh} to size of front window
-    end tell
-  end try
-
-  tell application "Safari"
-    set w to my previewWindow(u)
-    if w is missing value then
-      make new document with properties {URL:u}
-      -- a freshly launched Safari may also open its start page, so look it up again
-      set w to my previewWindow(u)
-    end if
-    if zx is not missing value then
-      set half to zw div 2
-      set bounds of w to {zx + half, zy, zx + zw, zy + zh}
-    end if
-  end tell
-
-  if zx is not missing value then
-    tell application "System Events" to tell process "Zed"
-      set size of front window to {zw div 2, zh}
-    end tell
-  else
-    tell application "Safari" to activate
-    return "typview: give Zed Accessibility access (System Settings > Privacy) to place the windows side by side"
-  end if
-  tell application "Zed" to activate
-  return ""
-end run
-
-on previewWindow(u)
-  tell application "Safari"
-    repeat with candidate in windows
-      try
-        if URL of current tab of candidate starts with u then return contents of candidate
-      end try
-    end repeat
-  end tell
-  return missing value
-end previewWindow
-OSA
+frame=$(osascript -e 'tell application "System Events" to tell process "Zed"
+  set {x, y} to position of front window
+  set {w, h} to size of front window
+  set size of front window to {w div 2, h}
+  return (x as text) & " " & y & " " & w & " " & h
+end tell' 2>/dev/null)
+if [ -n "$frame" ]; then
+  set -- $frame
+  half=$(($3 / 2))
+  open -a "$app" --args "$url" $(($1 + half)) "$2" $(($3 - half)) "$4"
+else
+  echo "typview: give Zed Accessibility access (System Settings > Privacy) to place the windows side by side" >&2
+  open -a "$app" --args "$url"
+fi
+sleep 0.3
+osascript -e 'tell application "Zed" to activate' >/dev/null 2>&1
+exit 0
