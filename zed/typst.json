@@ -3,7 +3,15 @@
 {
   "auto_install_extensions": { "typst": true },
   "languages": {
-    "Typst": { "tab_size": 2, "soft_wrap": "editor_width" }
+    // prose is rewrapped to 80 columns on save (below), so lines stay vim-motion friendly;
+    // `gq` rewraps by hand in between
+    "Typst": {
+      "tab_size": 2,
+      "soft_wrap": "editor_width",
+      "preferred_line_length": 80,
+      "wrap_guides": [80],
+      "allow_rewrap": "anywhere"
+    }
   },
   "lsp": {
     "tinymist": {
@@ -26,7 +34,8 @@
       "settings": {
         "exportPdf": "onSave",
         "formatterMode": "typstyle",
-        "formatterPrintWidth": 100
+        "formatterPrintWidth": 80,
+        "formatterProseWrap": true
       }
     }
   }
