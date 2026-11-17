@@ -248,6 +248,14 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   // pane (Zed resizing itself, a maximise), widen it if a gap opened
   func keepZedBeside() {
     guard let win = besideZed, let z = axFrame(win) else { return }
+    // the pane's top and bottom follow Zed's window (it may still have been opening, or
+    // since moved or resized, when the pane was placed)
+    if let primary = NSScreen.screens.first {
+      let y = primary.frame.height - z.maxY
+      if abs(pane.frame.minY - y) > 1 || abs(pane.frame.height - z.height) > 1 {
+        pane.setFrame(NSRect(x: pane.frame.minX, y: y, width: pane.frame.width, height: z.height), display: true)
+      }
+    }
     let edge = pane.frame.minX  // x means the same in AX and AppKit coordinates
     guard z.minX < edge - 200, abs(z.maxX - edge) > 2 else { return }
     axSetWidth(win, z, edge - z.minX)
