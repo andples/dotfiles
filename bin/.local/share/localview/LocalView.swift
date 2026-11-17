@@ -148,6 +148,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [unowned self] _ in
       self.checkServer()
       self.followTheme()
+      self.web.evaluateJavaScript("window.__lvEnsure && window.__lvEnsure()")
     }
     followTheme()
   }
@@ -340,7 +341,8 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   func applyTheme() {
     guard let t = theme else { return }
     pane.backgroundColor = NSColor(hex: t.bg) ?? .windowBackgroundColor
-    web.evaluateJavaScript("window.__lvTheme && window.__lvTheme('\(t.bg)', '\(t.fg)')")
+    web.evaluateJavaScript(
+      "window.__lvColors = ['\(t.bg)', '\(t.fg)']; window.__lvTheme && window.__lvTheme('\(t.bg)', '\(t.fg)')")
   }
 
   func webView(_ webView: WKWebView, didFinish nav: WKNavigation!) { applyTheme() }
@@ -356,6 +358,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 // (a per-channel linear map, like the preview's own dark-mode invert but to exact colours)
 let themeScript = """
 window.__lvTheme = function (bg, fg) {
+  window.__lvColors = [bg, fg];
   const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
   const [b, f] = [rgb(bg), rgb(fg)];
   const ns = 'http://www.w3.org/2000/svg';
@@ -378,6 +381,14 @@ window.__lvTheme = function (bg, fg) {
     html, body, #typst-container-main { overscroll-behavior: none !important; }
     .typst-doc, canvas { filter: url(#lv-theme); }`;
 };
+// re-apply if the preview rebuilt the page (checked every second by LocalView)
+window.__lvEnsure = function () {
+  if (window.__lvColors && !(document.getElementById('lv-style') && document.getElementById('lv-defs'))) {
+    window.__lvTheme(...window.__lvColors);
+  }
+};
+// colours LocalView set before this script was injected
+if (window.__lvColors) window.__lvTheme(...window.__lvColors);
 """
 
 // First capture group of a regex match, or nil
