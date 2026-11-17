@@ -8,7 +8,10 @@
   "show_whitespaces": "selection",
   "indent_guides": { "enabled": true, "coloring": "indent_aware" },
   "inlay_hints": { "enabled": true, "show_background": false },
-  "autosave": "on_focus_change",
+  // save a second after typing stops, not on switching away: a delayed autosave skips the
+  // whitespace trim and formatting, so alt-tab no longer strips the indent of a fresh line
+  // (:w / cmd-s still trims and formats)
+  "autosave": { "after_delay": { "milliseconds": 1000 } },
   "format_on_save": "on",
   "remove_trailing_whitespace_on_save": true,
   "ensure_final_newline_on_save": true,
