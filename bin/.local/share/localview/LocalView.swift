@@ -33,6 +33,9 @@ import WebKit
 let target = URL(string: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "http://127.0.0.1:23635")!
 let zedID = "dev.zed.Zed"
 let quitAfterOtherFiles = 60.0  // seconds of Zed showing non-Typst files
+let quitAfterHidden = 300.0  // seconds closed with `space p` before really quitting
+// where `typview` finds the running LocalView to signal (cheaper than looking it up)
+let pidFile = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("pid").path
 let quitAfterOffline = 10  // failed server checks in a row
 
 // A pane that can take keys (for Cmd-R etc.) without activating the app
@@ -81,6 +84,8 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   var pane: Pane!
   var web: WKWebView!
   var otherFilesSince: Date?
+  // closed with `space p`: hidden but kept loaded, so opening again is instant
+  var closedSince: Date?
   var offline = 0
   var placedBesideZed = false
   var besideZed: AXUIElement?  // the Zed window the pane sits beside, widened again on close
@@ -135,6 +140,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       signals.append(src)
     }
 
+    try? String(ProcessInfo.processInfo.processIdentifier).write(toFile: pidFile, atomically: true, encoding: .utf8)
     layout()
     update()
 
@@ -159,12 +165,22 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
   // `space p` again: close from the window it belongs to, move to any other Zed window
   func toggle() {
-    if let mine = besideZed, let front = zedWindow(), !CFEqual(mine, front) {
-      applicationWillTerminate(Notification(name: .init("move")))  // widen the old window back
+    if closedSince != nil {  // reopen: already loaded, just show it again
+      closedSince = nil
+      status.isVisible = true
+      layout()
+      update()
+      nudgeRender()
+    } else if let mine = besideZed, let front = zedWindow(), !CFEqual(mine, front) {
+      widenZed()  // the old window
       layout()
       update()
     } else {
-      NSApp.terminate(nil)
+      // close: hide at once and give Zed its width back, but stay loaded for a while
+      closedSince = Date()
+      pane.orderOut(nil)
+      status.isVisible = false
+      widenZed()
     }
   }
 
@@ -250,6 +266,11 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
   // Give Zed its full width back
   func applicationWillTerminate(_ note: Notification) {
+    try? FileManager.default.removeItem(atPath: pidFile)
+    if closedSince == nil { widenZed() }
+  }
+
+  func widenZed() {
     guard let win = besideZed, let z = axFrame(win), let primary = NSScreen.screens.first else { return }
     let zed = NSRect(x: z.minX, y: primary.frame.height - z.maxY, width: z.width, height: z.height)
     let screen = NSScreen.screens.first { $0.frame.intersects(zed) } ?? primary
@@ -259,6 +280,39 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   // Is the frontmost ordinary window Zed's? Menu bar menus, status item popovers, Spotlight
   // and the like sit above ordinary windows, so opening them (even when it makes their app
   // active) doesn't hide the pane; focusing another app's window does.
+  // Switched to another app (Cmd-Tab, a click) that has windows of its own: known at once
+  // from the activation, before the window order catches up. Menu bar apps have none.
+  func otherAppInFront() -> Bool {
+    guard let app = NSWorkspace.shared.frontmostApplication,
+          app.bundleIdentifier != zedID, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+          let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                kCGNullWindowID) as? [[String: Any]] else { return false }
+    return list.contains { w in
+      (w[kCGWindowLayer as String] as? Int) == 0 && (w[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier
+        && ((w[kCGWindowBounds as String] as? [String: CGFloat])?["Width"] ?? 0) >= 50
+    }
+  }
+
+  // Zed's window and tab changes, as they happen (the timer is only a backstop)
+  var zedObserver: AXObserver?
+  func watchZed() {
+    guard zedObserver == nil, AXIsProcessTrusted(), let zed = zedApp() else { return }
+    var obs: AXObserver?
+    let callback: AXObserverCallback = { _, _, _, ctx in
+      let me = Unmanaged<Delegate>.fromOpaque(ctx!).takeUnretainedValue()
+      me.update()
+    }
+    guard AXObserverCreate(zed.processIdentifier, callback, &obs) == .success, let obs else { return }
+    let app = AXUIElementCreateApplication(zed.processIdentifier)
+    let ctx = Unmanaged.passUnretained(self).toOpaque()
+    for n in [kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification, kAXTitleChangedNotification,
+              kAXApplicationActivatedNotification, kAXApplicationDeactivatedNotification] {
+      AXObserverAddNotification(obs, app, n as CFString, ctx)
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+    zedObserver = obs
+  }
+
   func zedWindowInFront() -> Bool {
     let me = ProcessInfo.processInfo.processIdentifier
     let zed = zedApp()?.processIdentifier
@@ -276,9 +330,15 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   }
 
   func update() {
+    watchZed()
+    if let since = closedSince {
+      if pane.isVisible { pane.orderOut(nil) }
+      if Date().timeIntervalSince(since) > quitAfterHidden { NSApp.terminate(nil) }
+      return
+    }
     // Accessibility granted while running: move beside Zed now
     if !placedBesideZed && AXIsProcessTrusted() { layout() }
-    let zedActive = zedWindowInFront()
+    let zedActive = !otherAppInFront() && zedWindowInFront()
     // the window it belongs to is in front, on a Typst tab (without Accessibility we can't
     // tell: assume yes)
     var typst = true

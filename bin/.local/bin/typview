@@ -12,7 +12,8 @@
 # macOS: LocalView, a borderless pane built from ~/.local/share/localview/LocalView.swift
 # on first use. It sits beside Zed's window (splitting it if Zed fills the screen), shows
 # only while Zed is active with a .typ file in front, and quits a minute after you leave
-# Typst or when Zed quits. It needs LocalView in System Settings > Privacy > Accessibility.
+# Typst or when Zed quits. Closed, it stays loaded (hidden) for 5 minutes, so opening it
+# again is instant. It needs LocalView in System Settings > Privacy > Accessibility.
 # Linux: a Chromium app window if there is one (no browser controls), else the default
 # browser; Omarchy's tiling puts it beside Zed.
 set -u
@@ -30,6 +31,21 @@ pdf_instead() {
   exit 1
 }
 
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/localview
+src=${XDG_DATA_HOME:-$HOME/.local/share}/localview/LocalView.swift
+app=$cache/LocalView.app
+bin=$app/Contents/MacOS/LocalView
+
+# Fast path, the usual case (no network check, no process search): LocalView is running,
+# so signal it straight from its pid file. It closes (hiding, and widening Zed back),
+# opens again, or moves to this Zed window.
+if [ -r "$cache/pid" ]; then
+  read -r pid < "$cache/pid"
+  case $(ps -p "$pid" -o comm= 2>/dev/null) in
+    */LocalView) kill -USR1 "$pid" && exit 0 ;;
+  esac
+fi
+
 if ! curl -s -o /dev/null --max-time 2 "$url"; then
   pdf_instead "no live preview at $url (it needs the background preview from zed/typst.json)"
 fi
@@ -45,9 +61,6 @@ if [ "$(uname)" != Darwin ]; then
   exit 0
 fi
 
-src=${XDG_DATA_HOME:-$HOME/.local/share}/localview/LocalView.swift
-app=${XDG_CACHE_HOME:-$HOME/.cache}/localview/LocalView.app
-bin=$app/Contents/MacOS/LocalView
 
 # Sign LocalView with a self-signed certificate made for it, so macOS sees each rebuild as
 # the same app and keeps its Accessibility access (an unsigned rebuild loses it). The
@@ -77,13 +90,6 @@ sign_app() {
   security unlock-keychain -p "$pass" "$kc" &&
     codesign --force --keychain "$kc" -s "$name" "$app" 2>/dev/null
 }
-
-# Already showing: LocalView closes (widening Zed back) if this is its Zed window, or
-# moves to this one if it isn't
-if pgrep -qf "$bin"; then
-  pkill -USR1 -f "$bin"
-  exit 0
-fi
 
 # Build LocalView.app when it's missing or its source changed
 if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then

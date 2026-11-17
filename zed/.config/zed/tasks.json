@@ -26,6 +26,8 @@
     // Without it set up, the PDF instead (like View PDF)
     "label": "Typst: live preview",
     "command": "typview \"$ZED_FILE\" \"$ZED_ROW\"",
+    // plain sh: tasks otherwise start your interactive shell, which can take most of a second
+    "shell": { "with_arguments": { "program": "/bin/sh", "args": ["-c"] } },
     "reveal": "never",
     "hide": "on_success"
   },
