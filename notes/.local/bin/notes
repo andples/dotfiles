@@ -61,8 +61,14 @@ clone() {
 }
 
 edit() {
+  # macOS doesn't put Zed's CLI on PATH unless you install it; the app carries its own
+  zed_app=
+  for a in /Applications/Zed.app "$HOME/Applications/Zed.app"; do
+    [ -x "$a/Contents/MacOS/cli" ] && { zed_app=$a/Contents/MacOS/cli; break; }
+  done
   if have zed; then zed "$@"
   elif have zeditor; then zeditor "$@"
+  elif [ -n "$zed_app" ]; then "$zed_app" "$@"
   else
     # terminal editor: just the file if there is one, then sync once it closes
     shift $(($# - 1))
