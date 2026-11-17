@@ -15,7 +15,8 @@
 // moves there. On launch it splits Zed's front window: Zed keeps the left half,
 // the pane takes the right. If Zed's window is already narrow, the pane fills the space
 // beside it instead. Needs LocalView in System Settings > Privacy > Accessibility (asked
-// once) to see and resize Zed's window.
+// once) to see and resize Zed's window. While the pane shows, Zed is kept to the space
+// beside it.
 //
 // A small menu bar icon shows it's running (hollow while the server is gone); its menu
 // closes or reloads the preview. Closing it (Cmd-W, `typview` again, or quitting on its own)
@@ -230,6 +231,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     if zedActive && typst {
       if !pane.isVisible { pane.orderFrontRegardless() }
+      keepZedBeside()
     } else if pane.isVisible {
       pane.orderOut(nil)
     }
@@ -240,6 +242,15 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     } else {
       otherFilesSince = nil
     }
+  }
+
+  // While showing, Zed's right edge stays against the pane: shrink it if it grew over the
+  // pane (Zed resizing itself, a maximise), widen it if a gap opened
+  func keepZedBeside() {
+    guard let win = besideZed, let z = axFrame(win) else { return }
+    let edge = pane.frame.minX  // x means the same in AX and AppKit coordinates
+    guard z.minX < edge - 200, abs(z.maxX - edge) > 2 else { return }
+    axSetWidth(win, z, edge - z.minX)
   }
 
   func handleKey(_ e: NSEvent) -> Bool {
