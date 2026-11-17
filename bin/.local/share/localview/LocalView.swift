@@ -15,8 +15,8 @@
 // beside it instead. Needs LocalView in System Settings > Privacy > Accessibility (asked
 // once) to see and resize Zed's window.
 //
-// A thin green line along the seam and a "Live" badge show it's running (orange, "Offline",
-// while the server is gone). Closing it (Cmd-W, `typview` again, or quitting on its own)
+// A small menu bar icon shows it's running (hollow while the server is gone); its menu
+// closes or reloads the preview. Closing it (Cmd-W, `typview` again, or quitting on its own)
 // widens Zed's window back to the edge of the screen.
 //
 // Keys (after clicking the pane): Cmd-R reload, Cmd-+ / Cmd-- / Cmd-0 zoom, Cmd-W close.
@@ -77,8 +77,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   var offline = 0
   var placedBesideZed = false
   var besideZed: AXUIElement?  // the Zed window the pane sits beside, widened again on close
-  var seam: NSView!
-  var badge: NSTextField!
+  var status: NSStatusItem!
   var live = true
   var sigterm: DispatchSourceSignal?
 
@@ -103,23 +102,15 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.allowsMagnification = true
-    let content = NSView()
-    web.autoresizingMask = [.width, .height]
-    content.addSubview(web)
-    seam = NSView()
-    seam.wantsLayer = true
-    seam.autoresizingMask = [.height]
-    content.addSubview(seam)
-    badge = NSTextField(labelWithString: "")
-    badge.font = .systemFont(ofSize: 11, weight: .semibold)
-    badge.textColor = .white
-    badge.alignment = .center
-    badge.wantsLayer = true
-    badge.layer?.cornerRadius = 9
-    badge.autoresizingMask = [.minXMargin, .minYMargin]
-    content.addSubview(badge)
-    pane.contentView = content
-    web.frame = content.bounds
+    pane.contentView = web
+
+    status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let menu = NSMenu()
+    let reload = NSMenuItem(title: "Reload Preview", action: #selector(reloadPreview), keyEquivalent: "")
+    reload.target = self
+    menu.addItem(reload)
+    menu.addItem(NSMenuItem(title: "Close Preview", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
+    status.menu = menu
     showLive(true)
     web.load(URLRequest(url: target))
 
@@ -160,7 +151,6 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       // can't see Zed yet (no Accessibility): right half of the screen, never over the editor
       let area = (NSScreen.main ?? primary).visibleFrame
       pane.setFrame(NSRect(x: area.midX, y: area.minY, width: area.width / 2, height: area.height), display: true)
-      placeIndicators()
       return
     }
     placedBesideZed = true
@@ -176,24 +166,18 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       left = zed.minX + half
     }
     pane.setFrame(NSRect(x: left, y: zed.minY, width: area.maxX - left, height: zed.height), display: true)
-    placeIndicators()
   }
 
-  func placeIndicators() {
-    let b = pane.contentView!.bounds
-    seam.frame = NSRect(x: 0, y: 0, width: 2, height: b.height)
-    badge.sizeToFit()
-    let w = badge.frame.width + 16
-    badge.frame = NSRect(x: b.width - w - 10, y: b.height - 18 - 10, width: w, height: 18)
-  }
+  @objc func reloadPreview() { web.reload() }
 
   func showLive(_ on: Bool) {
     live = on
-    let color = on ? NSColor.systemGreen : NSColor.systemOrange
-    seam.layer?.backgroundColor = color.cgColor
-    badge.layer?.backgroundColor = color.withAlphaComponent(0.85).cgColor
-    badge.stringValue = on ? "● Live" : "● Offline"
-    placeIndicators()
+    let image = NSImage(
+      systemSymbolName: on ? "doc.richtext.fill" : "doc.richtext",
+      accessibilityDescription: on ? "Typst preview: live" : "Typst preview: offline")
+    image?.isTemplate = true  // follows the menu bar's light/dark look
+    status.button?.image = image
+    status.button?.toolTip = on ? "Typst live preview" : "Typst live preview (server offline)"
   }
 
   // Give Zed its full width back
