@@ -81,8 +81,9 @@ Typst writes its PDF on save. `space p` opens tinymist's live preview (what VS C
 its side pane) through `typview`: it updates as you type, and clicking in it moves the
 cursor. On macOS it's LocalView, a tiny borderless viewer (built from
 `bin/.local/share/localview/LocalView.swift` on first use, no Dock icon), on the right half of
-Zed's window. It hides while Zed shows a non-Typst file and quits a minute later, or when Zed
-quits. Placing Zed needs Zed, and following it needs LocalView, in System Settings → Privacy →
+Zed's window. A green seam and a "Live" badge show it's running. It hides while Zed shows a non-Typst
+file and quits a minute later, or when Zed quits; `space p` again closes it, and Zed gets
+its full width back. Placing Zed needs Zed, and following it needs LocalView, in System Settings → Privacy →
 Accessibility. On Linux it's a Chromium app window, or the default browser.
 
 ### Peek

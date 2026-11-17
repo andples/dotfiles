@@ -15,6 +15,10 @@
 // beside it instead. Needs LocalView in System Settings > Privacy > Accessibility (asked
 // once) to see and resize Zed's window.
 //
+// A thin green line along the seam and a "Live" badge show it's running (orange, "Offline",
+// while the server is gone). Closing it (Cmd-W, `typview` again, or quitting on its own)
+// widens Zed's window back to the edge of the screen.
+//
 // Keys (after clicking the pane): Cmd-R reload, Cmd-+ / Cmd-- / Cmd-0 zoom, Cmd-W close.
 import AppKit
 import WebKit
@@ -72,6 +76,11 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   var otherFilesSince: Date?
   var offline = 0
   var placedBesideZed = false
+  var besideZed: AXUIElement?  // the Zed window the pane sits beside, widened again on close
+  var seam: NSView!
+  var badge: NSTextField!
+  var live = true
+  var sigterm: DispatchSourceSignal?
 
   func applicationDidFinishLaunching(_ note: Notification) {
     _ = AXIsProcessTrustedWithOptions(
@@ -94,8 +103,31 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.allowsMagnification = true
-    pane.contentView = web
+    let content = NSView()
+    web.autoresizingMask = [.width, .height]
+    content.addSubview(web)
+    seam = NSView()
+    seam.wantsLayer = true
+    seam.autoresizingMask = [.height]
+    content.addSubview(seam)
+    badge = NSTextField(labelWithString: "")
+    badge.font = .systemFont(ofSize: 11, weight: .semibold)
+    badge.textColor = .white
+    badge.alignment = .center
+    badge.wantsLayer = true
+    badge.layer?.cornerRadius = 9
+    badge.autoresizingMask = [.minXMargin, .minYMargin]
+    content.addSubview(badge)
+    pane.contentView = content
+    web.frame = content.bounds
+    showLive(true)
     web.load(URLRequest(url: target))
+
+    // `typview` again sends SIGTERM: close properly, widening Zed back
+    signal(SIGTERM, SIG_IGN)
+    sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    sigterm?.setEventHandler { NSApp.terminate(nil) }
+    sigterm?.resume()
 
     layout()
     update()
@@ -128,9 +160,11 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       // can't see Zed yet (no Accessibility): right half of the screen, never over the editor
       let area = (NSScreen.main ?? primary).visibleFrame
       pane.setFrame(NSRect(x: area.midX, y: area.minY, width: area.width / 2, height: area.height), display: true)
+      placeIndicators()
       return
     }
     placedBesideZed = true
+    besideZed = win
     // AX counts y down from the top of the primary screen, AppKit up from its bottom
     let zed = NSRect(x: z.minX, y: primary.frame.height - z.maxY, width: z.width, height: z.height)
     let screen = NSScreen.screens.first { $0.frame.intersects(zed) } ?? primary
@@ -142,6 +176,32 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       left = zed.minX + half
     }
     pane.setFrame(NSRect(x: left, y: zed.minY, width: area.maxX - left, height: zed.height), display: true)
+    placeIndicators()
+  }
+
+  func placeIndicators() {
+    let b = pane.contentView!.bounds
+    seam.frame = NSRect(x: 0, y: 0, width: 2, height: b.height)
+    badge.sizeToFit()
+    let w = badge.frame.width + 16
+    badge.frame = NSRect(x: b.width - w - 10, y: b.height - 18 - 10, width: w, height: 18)
+  }
+
+  func showLive(_ on: Bool) {
+    live = on
+    let color = on ? NSColor.systemGreen : NSColor.systemOrange
+    seam.layer?.backgroundColor = color.cgColor
+    badge.layer?.backgroundColor = color.withAlphaComponent(0.85).cgColor
+    badge.stringValue = on ? "● Live" : "● Offline"
+    placeIndicators()
+  }
+
+  // Give Zed its full width back
+  func applicationWillTerminate(_ note: Notification) {
+    guard let win = besideZed, let z = axFrame(win), let primary = NSScreen.screens.first else { return }
+    let zed = NSRect(x: z.minX, y: primary.frame.height - z.maxY, width: z.width, height: z.height)
+    let screen = NSScreen.screens.first { $0.frame.intersects(zed) } ?? primary
+    axSetWidth(win, z, screen.visibleFrame.maxX - z.minX)
   }
 
   func update() {
@@ -187,6 +247,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
       DispatchQueue.main.async {
         guard let self else { return }
         self.offline = response == nil ? self.offline + 1 : 0
+        if (self.offline == 0) != self.live { self.showLive(self.offline == 0) }
         if self.offline >= quitAfterOffline { NSApp.terminate(nil) }
       }
     }.resume()

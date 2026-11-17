@@ -3,7 +3,7 @@
 # clicking in it moves the cursor in Zed. Zed's Typst extension serves it (the
 # background preview in zed/typst.json) once a .typ file is open.
 #
-#   typview          open the preview (again: bring it back without moving windows)
+#   typview          open the preview; again: close it and give Zed its full width back
 #
 # macOS: LocalView, a borderless pane built from ~/.local/share/localview/LocalView.swift
 # on first use. It sits beside Zed's window (splitting it if Zed fills the screen), shows
@@ -32,10 +32,17 @@ if [ "$(uname)" != Darwin ]; then
   exit 0
 fi
 
-# Build LocalView.app when it's missing or its source changed
 src=${XDG_DATA_HOME:-$HOME/.local/share}/localview/LocalView.swift
 app=${XDG_CACHE_HOME:-$HOME/.cache}/localview/LocalView.app
 bin=$app/Contents/MacOS/LocalView
+
+# Already showing: close it (LocalView widens Zed back on its way out)
+if pgrep -qf "$bin"; then
+  pkill -TERM -f "$bin"
+  exit 0
+fi
+
+# Build LocalView.app when it's missing or its source changed
 if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
   have swiftc || { echo "typview: building the viewer needs Swift (xcode-select --install)" >&2; exit 1; }
   echo "typview: building LocalView (macOS asks again for its Accessibility access after a rebuild)"
@@ -56,7 +63,6 @@ if [ ! -x "$bin" ] || [ "$src" -nt "$bin" ]; then
 </dict>
 </plist>
 PLIST
-  pkill -f "$bin" 2>/dev/null
   swiftc -O -o "$bin" "$src" || { echo "typview: building LocalView failed" >&2; exit 1; }
 fi
 
