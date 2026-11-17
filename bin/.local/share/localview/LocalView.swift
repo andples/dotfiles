@@ -71,6 +71,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   var web: WKWebView!
   var otherFilesSince: Date?
   var offline = 0
+  var placedBesideZed = false
 
   func applicationDidFinishLaunching(_ note: Notification) {
     _ = AXIsProcessTrustedWithOptions(
@@ -122,7 +123,14 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
   // Zed keeps the left part of its screen, the pane gets the rest
   func layout() {
-    guard let win = zedWindow(), let z = axFrame(win), let primary = NSScreen.screens.first else { return }
+    guard let primary = NSScreen.screens.first else { return }
+    guard let win = zedWindow(), let z = axFrame(win) else {
+      // can't see Zed yet (no Accessibility): right half of the screen, never over the editor
+      let area = (NSScreen.main ?? primary).visibleFrame
+      pane.setFrame(NSRect(x: area.midX, y: area.minY, width: area.width / 2, height: area.height), display: true)
+      return
+    }
+    placedBesideZed = true
     // AX counts y down from the top of the primary screen, AppKit up from its bottom
     let zed = NSRect(x: z.minX, y: primary.frame.height - z.maxY, width: z.width, height: z.height)
     let screen = NSScreen.screens.first { $0.frame.intersects(zed) } ?? primary
@@ -137,6 +145,8 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
   }
 
   func update() {
+    // Accessibility granted while running: move beside Zed now
+    if !placedBesideZed && AXIsProcessTrusted() { layout() }
     let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     let zedActive = front == zedID || front == Bundle.main.bundleIdentifier
     // without Accessibility we can't see the file: assume Typst
