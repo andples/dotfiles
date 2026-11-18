@@ -14,6 +14,13 @@
     }
   },
   "lsp": {
+    "ruff": {
+      // lines up to 100 before ruff wraps them (its default, 88, splits many ordinary `if`
+      // conditions into a parenthesised block). A project's own ruff/pyproject settings win.
+      "initialization_options": {
+        "settings": { "lineLength": 100, "configurationPreference": "filesystemFirst" }
+      }
+    },
     "ty": {
       // completions only offer names already in scope: accepting one never adds an import
       "settings": { "completions": { "autoImport": false } }
