@@ -135,6 +135,34 @@ proj() {
   return 0
 }
 
+# resume any Claude Code session from any folder: fuzzy-pick one (newest first, with the
+# start of the conversation alongside), cd to the folder it ran in, and `claude --resume` it.
+# `cresume poker` starts with "poker" typed; `cresume -c` only lists this folder's sessions.
+# The list comes from the `claude-sessions` script.
+cresume() {
+  local here= pick cwd id tab
+  tab=$(printf '\t')
+  have fzf || { echo "cresume: needs fzf" >&2; return 1; }
+  have claude || { echo "cresume: needs Claude Code (claude)" >&2; return 1; }
+  case ${1-} in
+    -c|--here) here=$PWD; shift ;;
+    -h|--help) echo "usage: cresume [-c] [QUERY]   (-c: only sessions started in this folder)"; return 0 ;;
+  esac
+  if [ -n "$here" ]; then
+    pick=$(claude-sessions --cwd "$here")
+  else
+    pick=$(claude-sessions)
+  fi || return
+  [ -n "$pick" ] || { echo "cresume: no sessions${here:+ for this folder}" >&2; return 1; }
+  pick=$(printf '%s\n' "$pick" | fzf --delimiter="$tab" --with-nth=4.. --nth=2.. \
+    --query="$*" --prompt='resume> ' --preview='claude-sessions --preview {1}' \
+    --preview-window='down,55%,wrap') || return
+  cwd=$(printf '%s\n' "$pick" | cut -f2)
+  id=$(printf '%s\n' "$pick" | cut -f3)
+  [ -d "$cwd" ] || { echo "cresume: $cwd no longer exists (session $id)" >&2; return 1; }
+  builtin cd -- "$cwd" && claude --resume "$id"
+}
+
 # activate the venv in the current directory
 venv() {
   local d

@@ -167,6 +167,11 @@ keep anything long-lived as its own conversation. `claude-rc ls --json` lists ev
 scripts and dashboards. The list lives in `~/.config/claude-rc/`, outside the repo. See
 `claude-rc --help`.
 
+`cresume` resumes any Claude Code session, whatever folder you're in: it lists every
+project's sessions newest first (with the start of each conversation alongside), and after
+you pick one it changes to that session's folder and runs `claude --resume`. `cresume poker`
+starts with "poker" typed; `cresume -c` lists only the current folder's sessions.
+
 ## Agent instructions
 
 Edit `agents/.config/agents/AGENTS.md`. Every agent's global instructions file links to it,

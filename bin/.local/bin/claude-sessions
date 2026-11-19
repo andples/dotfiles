@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""List Claude Code sessions from every project, newest first, for `cresume` (shared.sh).
+
+  claude-sessions [--cwd DIR] [--limit N]   one line per session, tab-separated:
+                                             FILE  CWD  ID  WHEN  PROJECT  FIRST PROMPT
+  claude-sessions --preview FILE            the start of that conversation, for fzf's preview
+
+Sessions live in ~/.claude/projects/<folder>/<id>.jsonl ($CLAUDE_CONFIG_DIR/projects if set).
+The folder name can't be turned back into a path (path parts can contain "-"), so the
+real one comes from the "cwd" recorded in the session. Folders that no longer exist (old
+scratch workspaces) are marked "(gone)".
+"""
+import glob
+import json
+import os
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+ROOT = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"), "projects")
+
+
+def entries(path):
+    """The session's JSON lines, read lazily (sessions can be many MB)."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                yield json.loads(line)
+            except ValueError:
+                continue
+
+
+def text_of(entry):
+    """What a person typed in this entry, or None for tool results, reminders, commands etc."""
+    if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isSidechain"):
+        return None
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(content, str):
+        return None
+    content = content.strip()
+    if not content or content.startswith("<") or content.startswith("Caveat:"):
+        return None
+    return content
+
+
+def assistant_text(entry):
+    if entry.get("type") != "assistant" or entry.get("isSidechain"):
+        return None
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return content.strip() if isinstance(content, str) and content.strip() else None
+
+
+def tilde(path):
+    return "~" + path[len(HOME):] if path == HOME or path.startswith(HOME + "/") else path
+
+
+def one_line(s, width):
+    s = " ".join(s.split())
+    return s if len(s) <= width else s[: width - 1] + "…"
+
+
+def summary(path):
+    cwd, prompt = "", ""
+    for i, e in enumerate(entries(path)):
+        cwd = cwd or e.get("cwd", "")
+        prompt = text_of(e) or ""
+        if prompt or i > 400:
+            break
+    return cwd, prompt
+
+
+def list_sessions(only_cwd, limit):
+    files = sorted(glob.glob(os.path.join(ROOT, "*", "*.jsonl")), key=os.path.getmtime, reverse=True)
+    shown = 0
+    for path in files:
+        cwd, prompt = summary(path)
+        if not cwd or not prompt:  # empty or never got past startup
+            continue
+        if only_cwd and os.path.realpath(cwd) != os.path.realpath(only_cwd):
+            continue
+        project = tilde(cwd)
+        if len(project) > 40:
+            project = "…" + project[-39:]
+        if not os.path.isdir(cwd):
+            project += " (gone)"
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path)))
+        sid = os.path.basename(path)[: -len(".jsonl")]
+        print("\t".join([path, cwd, sid, when, f"{project:<42}", one_line(prompt, 120)]))
+        shown += 1
+        if shown >= limit:
+            break
+
+
+def preview(path, width=100, turns=12):
+    cwd, _ = summary(path)
+    print(f"{tilde(cwd)}{'' if os.path.isdir(cwd) else '  (folder gone)'}")
+    print(time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
+          f"  {os.path.getsize(path) // 1024} KB\n")
+    n = 0
+    for e in entries(path):
+        you, claude = text_of(e), assistant_text(e)
+        if you:
+            print("› " + one_line(you, width * 3) + "\n")
+            n += 1
+        elif claude:
+            print("  " + one_line(claude, width * 2) + "\n")
+        if n >= turns:
+            break
+
+
+def main(argv):
+    if argv[:1] == ["--preview"] and len(argv) == 2:
+        preview(argv[1])
+        return 0
+    only_cwd, limit = None, 300
+    while argv:
+        a = argv.pop(0)
+        if a == "--cwd" and argv:
+            only_cwd = argv.pop(0)
+        elif a == "--limit" and argv:
+            limit = int(argv.pop(0))
+        else:
+            print(__doc__.strip(), file=sys.stderr)
+            return 2
+    list_sessions(only_cwd, limit)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except BrokenPipeError:  # fzf closed early
+        sys.exit(0)
