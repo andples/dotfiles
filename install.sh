@@ -360,6 +360,34 @@ PLIST
   fi
 }
 
+# Ghostty reads the shared settings via an include, so ~/.config/ghostty/config stays this
+# machine's own file (window position, utheme's block). The include goes first: included
+# files load in order after the main file, so anything included later (a theme) wins.
+setup_ghostty() {
+  cfg="$HOME/.config/ghostty/config"
+  grep -qs '^config-file *= *"\{0,1\}dotfiles.conf' "$cfg" && return 0
+  echo "  including dotfiles.conf from ~/.config/ghostty/config"
+  [ -n "$DRY" ] && return 0
+  tmp="$cfg.dotfiles.$$"
+  { echo 'config-file = dotfiles.conf'; [ -f "$cfg" ] && cat "$cfg"; } > "$tmp" && mv "$tmp" "$cfg"
+}
+
+# Karabiner-Elements rewrites karabiner.json when you change anything in its window and
+# doesn't notice changes through a link, so the file is copied, and only when there's
+# none yet. The rule files under assets/ are linked as usual.
+setup_karabiner() {
+  src="$DOTFILES/karabiner/karabiner.json"
+  dest="$HOME/.config/karabiner/karabiner.json"
+  if [ ! -f "$dest" ]; then
+    echo "  copying karabiner.json to ~/.config/karabiner/"
+    run mkdir -p "$(dirname "$dest")"
+    run cp "$src" "$dest"
+  elif ! cmp -s "$src" "$dest"; then
+    echo "  ~/.config/karabiner/karabiner.json differs from the repo's, left alone. To keep yours:"
+    echo "    cp ~/.config/karabiner/karabiner.json $DOTFILES/karabiner/"
+  fi
+}
+
 peek_installed() {
   [ -d /Applications/Peek.app ] || [ -d "$HOME/Applications/Peek.app" ]
 }
@@ -381,6 +409,8 @@ nvim|any||minimal plugin-free nvim config
 readline|any||~/.inputrc for bash
 zed|any||Zed settings, keys and tasks
 direnv|any||direnv layout uv: activates the .venv in folders set up by uve
+ghostty|macos||Ghostty terminal settings, included from your own config
+karabiner|macos||Karabiner-Elements key remaps (Right Shift bracket layer, no Escape key)
 notes|any||~/notes: Typst notes in your own repo (<you>/notes on GitHub), synced every 2 minutes
 peek|macos|personal|Peek Markdown viewer app (private repo, builds from source)'
 
@@ -417,6 +447,8 @@ default_packages() {
   # Zed creates this folder on first launch
   if [ -d "$HOME/.config/zed" ]; then d="$d zed"; fi
   if have direnv; then d="$d direnv"; fi
+  if [ -d /Applications/Ghostty.app ]; then d="$d ghostty"; fi
+  if [ -d /Applications/Karabiner-Elements.app ]; then d="$d karabiner"; fi
   echo "$d"
 }
 
@@ -516,6 +548,9 @@ for pkg in "$@"; do
       zed/*) continue ;;
     esac
 
+    # karabiner.json is copied by setup_karabiner, not linked
+    [ "$pkg/$rel" = karabiner/karabiner.json ] && continue
+
     # notes: the timer is a systemd unit on Linux, a generated launchd agent on macOS
     case "$pkg/$rel" in
       notes/.config/systemd/*) [ "$(uname)" = Darwin ] && continue ;;
@@ -539,6 +574,8 @@ for pkg in "$@"; do
     run ln -s "$src" "$dest"
   done
   if [ "$pkg" = notes ]; then setup_notes; fi
+  if [ "$pkg" = ghostty ]; then setup_ghostty; fi
+  if [ "$pkg" = karabiner ]; then setup_karabiner; fi
 done
 
 # Remove links to files that are no longer in the repo (e.g. a package that was deleted)

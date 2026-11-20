@@ -104,6 +104,8 @@ itself, and a missing tool never makes it fail.
 | `zed` | snippets merged into `~/.config/zed/settings.json` (see below) | wherever Zed has been opened |
 | `readline` | `~/.inputrc` | bash without Omarchy |
 | `direnv` | `~/.config/direnv/direnvrc`: `layout uv` for the `.envrc` that `uve` writes | where direnv is installed |
+| `ghostty` | `~/.config/ghostty/dotfiles.conf`, included from your own `~/.config/ghostty/config` | macOS, where Ghostty is installed |
+| `karabiner` | Karabiner-Elements key remaps: hold Right Shift for brackets, Escape key off, Command/Option swapped on one external keyboard (see [Karabiner](#karabiner)) | macOS, where Karabiner is installed |
 | `notes` | `notes` and `notes-sync` in `~/.local/bin`, Typst templates, a 2-minute sync timer (see [Notes](#notes)) | when picked |
 | `peek` | builds the Peek app (see [Peek](#peek)) | personal, macOS, when picked |
 
@@ -197,6 +199,28 @@ package runs it every 2 minutes (a systemd user timer on Linux, a launchd agent 
 the repo as it is and sends one notification: fix the file, `git add` it,
 `git rebase --continue`. It never forces anything. Logs: `journalctl --user -u notes-sync`,
 or `~/Library/Logs/notes-sync.log`.
+
+## A new Mac
+
+`Brewfile` lists the command-line tools and apps this Mac has, so a new one gets them in one
+go (it skips anything already installed; delete lines you don't want first):
+
+```sh
+brew bundle --file ~/dotfiles/Brewfile
+```
+
+`./macos-defaults.sh` sets the macOS settings that would otherwise be clicked through again:
+fast key repeat with no accent popup, no autocorrect, Finder showing hidden files, extensions
+and the path bar in list view, no `.DS_Store` files on network and USB drives, an auto-hiding
+Dock without recent apps, no Stage Manager, and screenshots in `~/Documents/Screenshots`.
+`./macos-defaults.sh -n` shows what it would change. Some settings need a log out.
+
+### Karabiner
+
+Karabiner-Elements rewrites `karabiner.json` itself and doesn't notice changes made through a
+link, so `install.sh` copies the repo's copy only when there's none yet, and links the rule
+files in `assets/` as usual. After changing a remap in Karabiner's window, save it to the repo
+with `cp ~/.config/karabiner/karabiner.json ~/dotfiles/karabiner/`.
 
 ## Your own settings and secrets
 

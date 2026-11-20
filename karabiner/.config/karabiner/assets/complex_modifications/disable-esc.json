@@ -1,0 +1,26 @@
+{
+  "title": "Disable physical Escape",
+  "rules": [
+    {
+      "description": "Disable physical Escape key",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": {
+            "key_code": "escape",
+            "modifiers": {
+              "optional": [
+                "any"
+              ]
+            }
+          },
+          "to": [
+            {
+              "key_code": "vk_none"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

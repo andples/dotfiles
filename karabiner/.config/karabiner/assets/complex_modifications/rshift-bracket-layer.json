@@ -1,0 +1,52 @@
+{
+  "title": "Right Shift bracket layer (Colemak-DH via macOS input source)",
+  "rules": [
+    {
+      "description": "Hold Right Shift: left ring/middle type brackets — W F = [ ], R S = ( ), X C = { }",
+      "manipulators": [
+        {
+          "type": "basic",
+          "from": { "key_code": "right_shift", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "set_variable": { "name": "rshift_bracket_layer", "value": 1 } }],
+          "to_after_key_up": [{ "set_variable": { "name": "rshift_bracket_layer", "value": 0 } }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "w", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "open_bracket" }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "e", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "close_bracket" }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "s", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "9", "modifiers": ["left_shift"] }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "d", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "0", "modifiers": ["left_shift"] }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "x", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "open_bracket", "modifiers": ["left_shift"] }]
+        },
+        {
+          "type": "basic",
+          "conditions": [{ "type": "variable_if", "name": "rshift_bracket_layer", "value": 1 }],
+          "from": { "key_code": "c", "modifiers": { "optional": ["caps_lock"] } },
+          "to": [{ "key_code": "close_bracket", "modifiers": ["left_shift"] }]
+        }
+      ]
+    }
+  ]
+}
