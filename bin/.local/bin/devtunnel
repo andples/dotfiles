@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""devtunnel: auto-forward a remote dev box's localhost ports to this Mac over SSH.
+
+Keeps one SSH ControlMaster connection to the remote host, polls its listening
+TCP ports, and adds/removes `-L` forwards on the fly so http://localhost:PORT on
+this Mac reaches localhost:PORT on the remote. If PORT is already in use locally
+(by anything other than devtunnel), the forward is remapped to a free port.
+
+  devtunnel status      show current forwards
+  devtunnel run         run the daemon in the foreground (what launchd runs)
+  devtunnel install     install + start the launchd agent (starts at login)
+  devtunnel uninstall   stop + remove the launchd agent
+  devtunnel restart     restart the launchd agent (e.g. after editing config)
+  devtunnel logs        tail the daemon log
+
+Config: ~/.config/devtunnel/config.json (created with defaults on first run): "host" is
+an ssh host from ~/.ssh/config (or a Tailscale name) that you can ssh into without a password.
+macOS only (launchd). `ports` shows what each forwarded port is.
+"""
+import glob
+import json
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+CONFIG_PATH = os.path.join(HOME, ".config/devtunnel/config.json")
+STATE_DIR = os.path.join(HOME, ".local/state/devtunnel")
+STATE_PATH = os.path.join(STATE_DIR, "state.json")
+CONTROL_PATH = os.path.join(STATE_DIR, "ctl.sock")
+LOG_PATH = os.path.join(HOME, "Library/Logs/devtunnel.log")
+LABEL = "dotfiles.devtunnel"
+PLIST_PATH = os.path.join(HOME, "Library/LaunchAgents", LABEL + ".plist")
+
+DEFAULT_CONFIG = {
+    # ssh host alias (from ~/.ssh/config) or Tailscale name
+    "host": "oma",
+    # only forward remote ports in this range (skips system ports and the
+    # ephemeral range, where random internal listeners live)
+    "min_port": 1024,
+    "max_port": 32767,
+    # remote ports to never forward
+    "exclude": [],
+    # remote ports to always forward even if outside min/max
+    "include": [],
+    # when local PORT is taken, try PORT + remap_offset first, then scan upward
+    "remap_offset": 10000,
+    # seconds between remote port scans
+    "interval": 3,
+}
+
+# Remote listen addresses reachable via the remote's "localhost".
+LOOPBACK_OR_ANY = {"127.0.0.1", "::1", "0.0.0.0", "::", "*"}
+
+
+def log(msg):
+    print(time.strftime("%Y-%m-%d %H:%M:%S ") + msg, flush=True)
+
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+            f.write("\n")
+    with open(CONFIG_PATH) as f:
+        cfg = dict(DEFAULT_CONFIG)
+        cfg.update(json.load(f))
+    return cfg
+
+
+def ssh_base(cfg):
+    return ["ssh", "-S", CONTROL_PATH, cfg["host"]]
+
+
+# ---------------------------------------------------------------- remote side
+
+SS_LINE = re.compile(r"^\S+\s+\d+\s+\d+\s+(\S+):(\d+)\s+\S+(?:\s+users:\(\((.*)\)\))?")
+
+
+def remote_listeners(cfg):
+    """Return {port: process_name} for forwardable remote listeners, or None on error."""
+    try:
+        out = subprocess.run(
+            ssh_base(cfg) + ["ss -tlnpH"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if out.returncode != 0:
+        return None
+    ports = {}
+    for line in out.stdout.splitlines():
+        m = SS_LINE.match(line.strip())
+        if not m:
+            continue
+        addr, port, users = m.group(1), int(m.group(2)), m.group(3)
+        addr = addr.strip("[]").split("%")[0]
+        if addr not in LOOPBACK_OR_ANY:
+            continue
+        if port in cfg["exclude"]:
+            continue
+        if port not in cfg["include"] and not (cfg["min_port"] <= port <= cfg["max_port"]):
+            continue
+        name = ""
+        if users:
+            nm = re.match(r'"([^"]+)"', users)
+            name = nm.group(1) if nm else ""
+        if name or port not in ports:
+            ports[port] = name or ports.get(port, "")
+    return ports
+
+
+# ----------------------------------------------------------------- local side
+
+NETSTAT_ADDR = re.compile(r"[.:](\d+)$")
+
+
+def local_listening_ports():
+    """All TCP ports something on this Mac is listening on (any user)."""
+    out = subprocess.run(["/usr/sbin/netstat", "-an", "-p", "tcp"],
+                         capture_output=True, text=True)
+    ports = set()
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 6 and parts[-1] == "LISTEN":
+            m = NETSTAT_ADDR.search(parts[3])
+            if m:
+                ports.add(int(m.group(1)))
+    return ports
+
+
+def can_bind(port):
+    for fam, addr in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        s = socket.socket(fam, socket.SOCK_STREAM)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((addr, port))
+        except OSError:
+            return False
+        finally:
+            s.close()
+    return True
+
+
+def local_port_free(port, ours, listening):
+    return port not in ours and port not in listening and can_bind(port)
+
+
+def pick_local_port(remote_port, cfg, ours, listening):
+    if local_port_free(remote_port, ours, listening):
+        return remote_port
+    candidates = []
+    alt = remote_port + cfg["remap_offset"]
+    if alt <= 65535:
+        candidates.append(alt)
+    candidates.extend(range(max(alt + 1, 20000), 65536))
+    for p in candidates:
+        if local_port_free(p, ours, listening):
+            return p
+    return None
+
+
+# --------------------------------------------------------------------- daemon
+
+class Daemon:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.master = None
+        self.forwards = {}  # remote_port -> {"local": int, "proc": str}
+        self.connected = False
+        self.stopping = False
+
+    def write_state(self, error=""):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = STATE_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({
+                "pid": os.getpid(),
+                "host": self.cfg["host"],
+                "connected": self.connected,
+                "error": error,
+                "updated": time.time(),
+                "forwards": {str(k): v for k, v in sorted(self.forwards.items())},
+            }, f, indent=2)
+        os.replace(tmp, STATE_PATH)
+
+    def start_master(self):
+        os.makedirs(STATE_DIR, exist_ok=True)
+        if os.path.exists(CONTROL_PATH):
+            subprocess.run(ssh_base(self.cfg) + ["-O", "exit"], capture_output=True)
+            try:
+                os.unlink(CONTROL_PATH)
+            except FileNotFoundError:
+                pass
+        self.forwards = {}
+        self.master = subprocess.Popen(
+            ["ssh", "-M", "-S", CONTROL_PATH, "-N",
+             "-o", "ControlPersist=no",
+             "-o", "BatchMode=yes",
+             "-o", "ConnectTimeout=10",
+             "-o", "ServerAliveInterval=10",
+             "-o", "ServerAliveCountMax=3",
+             "-o", "ExitOnForwardFailure=no",
+             self.cfg["host"]],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,  # stderr -> log
+        )
+        for _ in range(60):
+            if self.master.poll() is not None:
+                raise RuntimeError("ssh exited with code %d" % self.master.returncode)
+            r = subprocess.run(ssh_base(self.cfg) + ["-O", "check"], capture_output=True)
+            if r.returncode == 0:
+                return
+            time.sleep(0.25)
+        raise RuntimeError("ssh master did not come up")
+
+    def master_alive(self):
+        return self.master is not None and self.master.poll() is None
+
+    def add_forward(self, rport, proc, listening):
+        ours = {f["local"] for f in self.forwards.values()}
+        lport = pick_local_port(rport, self.cfg, ours, listening)
+        if lport is None:
+            log("no free local port for remote %d, skipping" % rport)
+            return
+        spec = "%d:localhost:%d" % (lport, rport)
+        r = subprocess.run(ssh_base(self.cfg) + ["-O", "forward", "-L", spec],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            log("forward %s failed: %s" % (spec, r.stderr.strip()))
+            return
+        self.forwards[rport] = {"local": lport, "proc": proc}
+        note = "" if lport == rport else "  (local %d busy -> remapped)" % rport
+        log("+ remote %d -> http://localhost:%d %s%s" % (rport, lport, proc, note))
+
+    def remove_forward(self, rport):
+        fw = self.forwards.pop(rport)
+        spec = "%d:localhost:%d" % (fw["local"], rport)
+        subprocess.run(ssh_base(self.cfg) + ["-O", "cancel", "-L", spec], capture_output=True)
+        log("- remote %d (localhost:%d) gone" % (rport, fw["local"]))
+
+    def sync(self, remote):
+        for rport in [p for p in self.forwards if p not in remote]:
+            self.remove_forward(rport)
+        new = [p for p in sorted(remote) if p not in self.forwards]
+        if new:
+            listening = local_listening_ports()
+            for rport in new:
+                self.add_forward(rport, remote[rport], listening)
+        for rport, proc in remote.items():
+            if rport in self.forwards and proc:
+                self.forwards[rport]["proc"] = proc
+
+    def shutdown(self, *_):
+        self.stopping = True
+
+    def run(self):
+        signal.signal(signal.SIGTERM, self.shutdown)
+        signal.signal(signal.SIGINT, self.shutdown)
+        backoff = 2
+        while not self.stopping:
+            if not self.master_alive():
+                self.connected = False
+                self.forwards = {}
+                try:
+                    log("connecting to %s ..." % self.cfg["host"])
+                    self.start_master()
+                    self.connected = True
+                    backoff = 2
+                    log("connected")
+                except Exception as e:
+                    log("connect failed: %s (retry in %ds)" % (e, backoff))
+                    self.write_state(error=str(e))
+                    self.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
+                    continue
+            remote = remote_listeners(self.cfg)
+            if remote is None:
+                if not self.master_alive():
+                    log("connection lost")
+                    continue
+            else:
+                self.sync(remote)
+            self.write_state()
+            self.sleep(self.cfg["interval"])
+        log("stopping")
+        if self.master_alive():
+            self.master.terminate()
+        self.connected = False
+        self.forwards = {}
+        self.write_state(error="stopped")
+
+    def sleep(self, secs):
+        end = time.time() + secs
+        while not self.stopping and time.time() < end:
+            time.sleep(0.2)
+
+
+# ------------------------------------------------------------------- commands
+
+def cmd_status():
+    try:
+        with open(STATE_PATH) as f:
+            st = json.load(f)
+    except FileNotFoundError:
+        print("devtunnel has not run yet. Try: devtunnel install")
+        return 1
+    alive = False
+    try:
+        os.kill(st["pid"], 0)
+        alive = True
+    except (OSError, KeyError):
+        pass
+    age = time.time() - st.get("updated", 0)
+    if not alive:
+        print("daemon: NOT RUNNING (last state %ds old)" % age)
+    elif st.get("connected"):
+        print("daemon: running, connected to %s" % st["host"])
+    else:
+        print("daemon: running, NOT connected to %s: %s" % (st["host"], st.get("error", "")))
+    fws = st.get("forwards", {})
+    if not fws:
+        print("no forwards")
+        return 0
+    print()
+    print("%-8s  %-28s  %s" % ("REMOTE", "LOCAL URL", "PROCESS"))
+    for rport, fw in sorted(fws.items(), key=lambda kv: int(kv[0])):
+        flag = "" if int(rport) == fw["local"] else "  * remapped"
+        print("%-8s  %-28s  %s%s" % (rport, "http://localhost:%d" % fw["local"], fw["proc"] or "?", flag))
+    return 0
+
+
+PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>{script}</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{log}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
+"""
+
+
+def launchctl(*args):
+    return subprocess.run(["launchctl"] + list(args), capture_output=True, text=True)
+
+
+def remove_old_agents():
+    """Agents from before the label was dotfiles.devtunnel (com.<name>.devtunnel)."""
+    for plist in glob.glob(os.path.join(os.path.dirname(PLIST_PATH), "*.devtunnel.plist")):
+        label = os.path.basename(plist)[: -len(".plist")]
+        if label != LABEL:
+            launchctl("bootout", "gui/%d/%s" % (os.getuid(), label))
+            os.unlink(plist)
+            print("removed the old agent %s" % label)
+
+
+def cmd_install():
+    load_config()
+    remove_old_agents()
+    os.makedirs(os.path.dirname(PLIST_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+    with open(PLIST_PATH, "w") as f:
+        f.write(PLIST.format(label=LABEL, script=os.path.abspath(__file__), log=LOG_PATH))
+    domain = "gui/%d" % os.getuid()
+    launchctl("bootout", domain + "/" + LABEL)
+    r = launchctl("bootstrap", domain, PLIST_PATH)
+    if r.returncode != 0:
+        print("launchctl bootstrap failed: " + r.stderr.strip())
+        return 1
+    print("installed %s (starts at login, restarts if it dies)" % PLIST_PATH)
+    print("config: %s\nlogs:   %s" % (CONFIG_PATH, LOG_PATH))
+    return 0
+
+
+def cmd_uninstall():
+    launchctl("bootout", "gui/%d/%s" % (os.getuid(), LABEL))
+    if os.path.exists(PLIST_PATH):
+        os.unlink(PLIST_PATH)
+    print("uninstalled")
+    return 0
+
+
+def cmd_restart():
+    r = launchctl("kickstart", "-k", "gui/%d/%s" % (os.getuid(), LABEL))
+    if r.returncode != 0:
+        print("restart failed (is it installed?): " + r.stderr.strip())
+        return 1
+    print("restarted")
+    return 0
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if cmd == "run":
+        Daemon(load_config()).run()
+        return 0
+    if cmd == "status":
+        return cmd_status()
+    if cmd == "install":
+        return cmd_install()
+    if cmd == "uninstall":
+        return cmd_uninstall()
+    if cmd == "restart":
+        return cmd_restart()
+    if cmd == "logs":
+        os.execvp("tail", ["tail", "-n", "50", "-f", LOG_PATH])
+    print(__doc__)
+    return 0 if cmd in ("-h", "--help", "help") else 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

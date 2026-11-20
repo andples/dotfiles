@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""ports: every server listening on this machine, and what each one is.
+
+  ports            all of them, with a name where one can be found
+  ports 5173       just that port
+  ports -n         don't ask the servers for their page title (faster)
+
+For each port it shows:
+  WHAT   the web page's <title> (or the Server header) if it speaks HTTP; otherwise the
+         Docker container, the app (Zed, Claude Code, AirPlay...) or the command
+  RUN    the command that started it, and WHERE the folder it was started in
+Ports that devtunnel forwards from another machine show that machine's process and folder
+(as host:~/folder), read over the tunnel's existing SSH connection.
+Works on macOS (lsof) and Linux (ss). Only your own processes show their details.
+"""
+import concurrent.futures
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+HOME = os.path.expanduser("~")
+TUNNEL_STATE = os.path.join(HOME, ".local/state/devtunnel")
+
+# macOS processes that aren't obvious from their name
+KNOWN = {
+    "ControlCenter": "AirPlay Receiver (System Settings > General > AirDrop & Handoff)",
+    "rapportd": "Handoff / Continuity",
+    "lghub_agent": "Logitech G Hub",
+    "limactl": "Colima / Docker VM",
+    "sharingd": "AirDrop / sharing",
+    "Spotify": "Spotify (Connect)",
+}
+
+
+def run(cmd, timeout=3):
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return out.stdout if out.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def tilde(path, home=HOME):
+    if path == home:
+        return "~"
+    return "~" + path[len(home):] if path.startswith(home + "/") else path
+
+
+# ------------------------------------------------------------------ listeners
+
+def listeners():
+    """{port: {"pid": int, "name": str, "addr": str}} for this machine's TCP listeners."""
+    found = {}
+    if sys.platform == "darwin" or not shutil.which("ss"):
+        pid = name = None
+        for line in run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]).splitlines():
+            tag, val = line[:1], line[1:]
+            if tag == "p":
+                pid = int(val)
+            elif tag == "c":
+                name = val
+            elif tag == "n":
+                addr, _, port = val.rpartition(":")
+                if port.isdigit():
+                    add(found, int(port), pid, name, addr)
+    else:
+        for line in run(["ss", "-tlnpH"]).splitlines():
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            addr, _, port = parts[3].rpartition(":")
+            m = re.search(r'\("([^"]+)",pid=(\d+)', line)
+            if port.isdigit():
+                add(found, int(port), int(m.group(2)) if m else None, m.group(1) if m else "", addr)
+    return found
+
+
+def add(found, port, pid, name, addr):
+    addr = addr.strip("[]")
+    cur = found.get(port)
+    if cur is None or (cur["pid"] is None and pid):
+        found[port] = {"pid": pid, "name": name or "", "addrs": {addr}}
+    else:
+        cur["addrs"].add(addr)
+
+
+def proc_info(pids):
+    """{pid: (command line, cwd)} for our own processes."""
+    pids = [p for p in pids if p]
+    if not pids:
+        return {}
+    args = {}
+    for line in run(["ps", "-o", "pid=,args=", "-p", ",".join(map(str, pids))]).splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if pid.isdigit():
+            args[int(pid)] = cmd.strip()
+    cwds = {}
+    if os.path.isdir("/proc"):
+        for p in pids:
+            try:
+                cwds[p] = os.readlink("/proc/%d/cwd" % p)
+            except OSError:
+                pass
+    else:
+        pid = None
+        out = run(["lsof", "-a", "-p", ",".join(map(str, pids)), "-d", "cwd", "-Fn"])
+        for line in out.splitlines():
+            if line[:1] == "p":
+                pid = int(line[1:])
+            elif line[:1] == "n" and pid:
+                cwds[pid] = line[1:]
+    return {p: (args.get(p, ""), cwds.get(p, "")) for p in pids}
+
+
+# ------------------------------------------------------------------ devtunnel
+
+def tunnel_forwards():
+    """{local port: {"rport", "proc", "cmd", "cwd"}} for ports devtunnel forwards here."""
+    try:
+        with open(os.path.join(TUNNEL_STATE, "state.json")) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return {}, ""
+    host = st.get("host", "")
+    fws = {fw["local"]: {"rport": int(r), "proc": fw.get("proc", ""), "cmd": "", "cwd": ""}
+           for r, fw in st.get("forwards", {}).items()}
+    sock = os.path.join(TUNNEL_STATE, "ctl.sock")
+    if fws and os.path.exists(sock):
+        # one command over the tunnel's own connection: home, then port, cwd, command
+        script = r"""echo "$HOME"; ss -tlnpH 2>/dev/null | while read -r _ _ _ l _ u; do
+  pid=$(echo "$u" | sed -n 's/.*pid=\([0-9]*\).*/\1/p'); [ -n "$pid" ] || continue
+  printf '%s\t%s\t%s\n' "${l##*:}" "$(readlink /proc/$pid/cwd)" "$(tr '\0' ' ' </proc/$pid/cmdline)"
+done
+command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>/dev/null |
+  sed -n 's/^\([^\t]*\)\t\([^\t]*\)\t.*:\([0-9]*\)->.*/\3\tdocker\t\1 (\2)/p'"""
+        out = run(["ssh", "-S", sock, "-o", "BatchMode=yes", host, script], timeout=5).splitlines()
+        rhome = out[0] if out else ""
+        byport = {}
+        for line in out[1:]:
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[0].isdigit():
+                if parts[1] == "docker":
+                    byport.setdefault(int(parts[0]), ("docker: " + parts[2], ""))
+                else:
+                    byport[int(parts[0])] = (parts[2].strip(), parts[1])
+        for fw in fws.values():
+            cmd, cwd = byport.get(fw["rport"], ("", ""))
+            fw["cmd"], fw["cwd"] = cmd, tilde(cwd, rhome) if rhome else cwd
+    return fws, host
+
+
+# ------------------------------------------------------------------ naming
+
+def docker_ports():
+    if not shutil.which("docker"):
+        return {}
+    names = {}
+    for line in run(["docker", "ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Ports}}"], timeout=2).splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        for m in re.finditer(r":(\d+)->", parts[2]):
+            names[int(m.group(1))] = "docker: %s (%s)" % (parts[0], parts[1])
+    return names
+
+
+def http_name(port):
+    """(page title, Server header or status) if the port answers HTTP, else ("", "")."""
+    try:
+        req = urllib.request.Request("http://localhost:%d/" % port, headers={"User-Agent": "ports"})
+        with urllib.request.urlopen(req, timeout=0.6) as r:
+            body, server = r.read(65536), r.headers.get("Server", "")
+    except urllib.error.HTTPError as e:
+        body, server = b"", e.headers.get("Server", "") if e.headers else ""
+        server = server or "HTTP %d" % e.code
+    except Exception:
+        return "", ""
+    m = re.search(rb"<title[^>]*>(.*?)</title>", body, re.I | re.S)
+    if m:
+        title = " ".join(html.unescape(m.group(1).decode("utf-8", "replace")).split())
+        if title:
+            return title, server
+    return "", server or "HTTP"
+
+
+def short_cmd(cmd):
+    """`/long/path/.venv/bin/python3 manage.py runserver 0:8000` -> `python3 manage.py runserver 0:8000`"""
+    if not cmd:
+        return ""
+    m = re.search(r"/([^/]+)\.app/Contents/", cmd)
+    if m:
+        return m.group(1) + ".app"
+    first, _, rest = cmd.partition(" ")
+    return (os.path.basename(first) + " " + rest).strip()
+
+
+def app_name(name, cmd):
+    base = os.path.basename(cmd.split(" ")[0]) if cmd else name
+    if base == "claude" or "/claude/versions/" in cmd:
+        return "Claude Code"
+    for key, label in KNOWN.items():
+        if key in (name, base):
+            return label
+    m = re.search(r"/([^/]+)\.app/Contents/", cmd)
+    return m.group(1) if m else ""
+
+
+def clip(s, n):
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def main(argv):
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    probe = "-n" not in argv
+    only = {int(a) for a in argv if a.isdigit()}
+
+    ports = listeners()
+    if only:
+        ports = {p: v for p, v in ports.items() if p in only}
+    if not ports:
+        print("nothing listening" + (" on %s" % ", ".join(map(str, sorted(only))) if only else ""))
+        return 1
+    procs = proc_info({v["pid"] for v in ports.values()})
+    tunnel, host = tunnel_forwards()
+    docker = docker_ports()
+    titles = {}
+    if probe:
+        with concurrent.futures.ThreadPoolExecutor(32) as pool:
+            titles = dict(zip(ports, pool.map(http_name, ports)))
+
+    def name_for(port, *guesses):
+        # a page title beats everything; a bare Server header or status only beats nothing
+        title, server = titles.get(port, ("", ""))
+        return title or next((g for g in guesses if g), "") or server
+
+    rows = []
+    for port in sorted(ports):
+        v = ports[port]
+        cmd, cwd = procs.get(v["pid"], ("", ""))
+        fw = tunnel.get(port) if v["name"] == "ssh" or "ssh" in cmd else None
+        if fw:
+            cmd = fw["cmd"] or fw["proc"] or "(not visible: another user's, or the system's)"
+            where = "%s:%s" % (host, fw["cwd"]) if fw["cwd"] else host
+            if fw["rport"] != port:
+                where += " (port %d there)" % fw["rport"]
+            what = name_for(port, cmd[8:] if cmd.startswith("docker: ") else "", app_name(fw["proc"], cmd))
+        else:
+            where = tilde(cwd) if cwd and cwd != "/" else ""
+            what = name_for(port, docker.get(port), app_name(v["name"], cmd))
+        local_only = all(a in ("127.0.0.1", "::1", "localhost") for a in v["addrs"])
+        rows.append((str(port), "" if local_only else "*", clip(what, 40),
+                     clip(short_cmd(cmd) or v["name"] or "?", 48), where))
+
+    tty = sys.stdout.isatty()
+    dim, bold, off = ("\033[2m", "\033[1m", "\033[0m") if tty else ("", "", "")
+    print(bold + "%-6s %-40s  %-48s  %s" % ("PORT", "WHAT", "RUN", "WHERE") + off)
+    for port, net, what, cmd, where in rows:
+        print("%-6s %-40s  %s%-48s%s  %s" % (port + net, what or "-", dim, cmd, off, where))
+    if any(r[1] for r in rows):
+        print(dim + "* also reachable from other machines on the network, not just localhost" + off)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except BrokenPipeError:
+        sys.exit(0)

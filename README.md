@@ -222,6 +222,30 @@ link, so `install.sh` copies the repo's copy only when there's none yet, and lin
 files in `assets/` as usual. After changing a remap in Karabiner's window, save it to the repo
 with `cp ~/.config/karabiner/karabiner.json ~/dotfiles/karabiner/`.
 
+## Servers on another machine
+
+`devtunnel` (macOS) keeps one SSH connection open to a dev server and forwards every port
+that starts listening there, so `http://localhost:PORT` on the Mac reaches the same port on
+the server: start `npm run dev` over there and open it here, nothing to set up per project.
+It checks for new ports every few seconds, and if a port is already taken on the Mac it uses
+PORT+10000 instead. Set it up once:
+
+```sh
+devtunnel install   # starts now and at every login, restarts if it dies
+devtunnel status    # what's forwarded; `devtunnel logs`, `restart`, `uninstall`
+```
+
+The server is `"host"` in `~/.config/devtunnel/config.json` (created on first run): a host
+from `~/.ssh/config` or a Tailscale name you can ssh into without a password. The same file
+sets the port range, ports to skip, and how often it checks.
+
+`ports` lists every server listening on this machine and what it is: the page's title if it
+serves a web page, otherwise the Docker container, the app (Zed, Claude Code, AirPlay...) or
+the command, with the folder it was started in. Ports forwarded by `devtunnel` show the
+command and folder on the server (`server:~/project`). `ports 5173` shows just one, `ports -n`
+skips asking each server for its title. To free a port: `port 5173` shows what's listening,
+`killport 5173` stops it (local servers only).
+
 ## Your own settings and secrets
 
 Keep anything personal or machine-specific outside the repo. `shared.sh` loads these last,
