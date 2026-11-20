@@ -4,6 +4,66 @@ My shell, git, prompt and editor config, shared between macOS (zsh) and Linux (b
 including [Omarchy](https://omarchy.org) and machines where I don't have admin rights).
 Every helper works the same in bash and zsh. Fork it and make it yours.
 
+## What's in it
+
+**Aliases**
+- `..` / `...` / `....`: go up one, two or three folders
+- `ls`, `lsa`, `lt`: eza listing, listing with hidden files, two-level tree with git status
+- `g`: git · `gcm "msg"`: commit · `gcam "msg"`: commit all changes
+- `gsend`: add everything, commit "wip" and push
+- `ff` / `eff`: fuzzy-find a file with a preview / open it in nvim
+- `decompress`: `tar -xzf`
+
+**Shell functions**
+- `proj`: fuzzy-pick a folder or repo and cd there (Ctrl-O also opens it in Zed)
+- `cresume`: resume any Claude Code session from any folder (`-c`: only this folder's)
+- `zedo`: open a folder in Zed · `nf`: fuzzy-search recently opened nvim files
+- `gco`: git checkout, or pick a branch with fzf
+- `mkcd`: make a folder and cd into it · `path`: `$PATH` one entry per line
+- `port N` / `killport N`: show or kill what's listening on a port
+- `serve [port]`: HTTP server in the current folder
+- `extract`: unpack any archive · `compress`: make a `.tar.gz`
+- `venv`: activate the folder's venv · `uve`: set up a uv project with a direnv `.envrc`
+- `pb`: copy stdin to the clipboard · `cheat X`: look X up on cheat.sh
+
+**Scripts** (`~/.local/bin`)
+- `send`: copy files to another machine over SSH, fuzzy-picking both ends
+- `recentdl [n]`: move your newest download(s) into the current folder
+- `claude-rc`: keep Claude Remote Control sessions running in tmux
+- `claude-sessions`: list every Claude Code session (behind `cresume`)
+- `projects` / `pick-dir`: list git repos / fuzzy-pick a folder (behind `proj`)
+- `peek file.md`: show Markdown formatted in the Peek app
+- `pdfview`: PDF viewer that reloads on change and jumps to the LaTeX line
+- `typview`: live Typst preview beside Zed
+- `zed-keys`: cheat sheet of this config's Zed keys and tasks
+
+**Notes**
+- `notes [NAME]`: open the notes folder, or open/start a Typst note
+- `notes -p NAME`: its PDF · `notes template NAME`: switch between `classic` and `math`
+- `notes pdfs`: GitHub Action that builds every note to PDF daily
+- `notes-sync`: commit, rebase and push `~/notes`, every 2 minutes
+
+**Zed** (vim mode, space leader)
+- `space p`: preview (Markdown, LaTeX PDF, Typst) · `space r` / `R`: re-run / pick a task
+- `space t`: run the test or `main` at the cursor
+- `space o` / `O` / `z`: recent projects / open folder / `proj` picker
+- `space g g`: git panel, plus stage, undo, blame and history under `space g`
+- `space f` `/` `e` `j`: files, search, file tree, terminal
+- `space d` `a` `c` `F`: diagnostics, code actions, rename, format
+- Python, OCaml, Rust, C/C++, LaTeX, Typst and Markdown set up
+
+**Git defaults**
+- `main` as the default branch, rebase on pull with autostash, push sets up the remote
+- zdiff3 conflicts, histogram diffs, rerere, branches sorted by most recent
+
+**Everything else**
+- Starship prompt with machine name, folder and git status
+- zoxide as `cd`, plus fzf, mise, direnv and opam when they're installed
+- Minimal nvim config, `.zshrc` (macOS), `.inputrc`
+- One `AGENTS.md` for Claude Code, Codex, opencode and pi
+- Machine-only settings and secrets in `local.sh` / `secrets.sh`, outside the repo
+- `zed-playground` submodule for trying the Zed setup
+
 ## Install
 
 ```sh
