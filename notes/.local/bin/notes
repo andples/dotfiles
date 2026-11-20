@@ -10,7 +10,7 @@
 #   notes sync                sync now
 #   notes --clone             clone your notes repo to ~/notes if it isn't there
 # The repo is <your gh user>/notes (offered to be made, private, if you don't have one yet).
-# NOTES_REPO (owner/repo or a git URL) and NOTES_DIR (default ~/notes) override.
+# NOTES_REPO (owner/repo, a git URL or a path) and NOTES_DIR (default ~/notes) override.
 set -u
 dir=${NOTES_DIR:-$HOME/notes}
 templates=${XDG_DATA_HOME:-$HOME/.local/share}/notes/templates
@@ -36,7 +36,7 @@ clone() {
     return 1
   fi
   case $repo in
-    *:*) ;;
+    *:* | /* | .*) ;;
     *)
       if gh_ok && ! gh repo view "$repo" >/dev/null 2>&1; then
         [ -t 0 ] || { echo "notes: $repo doesn't exist: run \`notes\` to make it" >&2; return 1; }
@@ -48,7 +48,7 @@ clone() {
   esac
   echo "notes: cloning $repo into $dir"
   case $repo in
-    *:*) git clone -q "$repo" "$dir" ;;
+    *:* | /* | .*) git clone -q "$repo" "$dir" ;;
     *) if gh_ok; then
          gh repo clone "$repo" "$dir" -- -q 2>/dev/null
        else

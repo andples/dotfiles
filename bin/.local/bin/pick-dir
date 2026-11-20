@@ -58,20 +58,37 @@ self=$(command -v pick-dir || echo "$0")
 cache=$(mktemp "${TMPDIR:-/tmp}/pick-dir.XXXXXX")
 trap 'rm -f "$cache"' EXIT
 list_start | home_to_tilde > "$cache"
-out=$(fzf < "$cache" \
-  --scheme=path --tiebreak=length,index --prompt='folder> ' \
-  --header='type ~/ or / to browse · tab: go into · enter: pick' \
-  --bind "change:transform('$self' --on-change '$cache')" \
-  --bind 'tab:transform-query(p={}; case $p in */) printf %s "$p" ;; *) printf %s/ "$p" ;; esac)' \
-  --bind 'enter:accept-or-print-query' \
-  --preview='d={}; d="$HOME${d#"~"}"; git -C "$d" log --oneline --color=always -8 2>/dev/null; echo; ls "$d"' \
-  --preview-window='right,45%' \
-  "$@") || exit $?
-
-# with --expect, line 1 is the key; the path is the last line
+preview='d={}; d="$HOME${d#"~"}"; git -C "$d" log --oneline --color=always -8 2>/dev/null; echo; ls "$d"'
 key=
-if [ "$(printf '%s\n' "$out" | wc -l)" -gt 1 ]; then key=$(printf '%s\n' "$out" | head -n 1); fi
-d=$(printf '%s\n' "$out" | tail -n 1)
+if echo x | fzf --filter x --bind 'change:transform(true)' --bind 'enter:accept-or-print-query' >/dev/null 2>&1; then
+  out=$(fzf < "$cache" \
+    --scheme=path --tiebreak=length,index --prompt='folder> ' \
+    --header='type ~/ or / to browse · tab: go into · enter: pick' \
+    --bind "change:transform('$self' --on-change '$cache')" \
+    --bind 'tab:transform-query(p={}; case $p in */) printf %s "$p" ;; *) printf %s/ "$p" ;; esac)' \
+    --bind 'enter:accept-or-print-query' \
+    --preview="$preview" --preview-window='right,45%' \
+    "$@") || exit $?
+  # with --expect, line 1 is the key; the path is the last line
+  if [ "$(printf '%s\n' "$out" | wc -l)" -gt 1 ]; then key=$(printf '%s\n' "$out" | head -n 1); fi
+  d=$(printf '%s\n' "$out" | tail -n 1)
+else
+  # fzf < 0.45 (e.g. Ubuntu 24.04) has no transform: no browsing as you type, but a
+  # typed path that matches nothing is still picked
+  out=$(fzf < "$cache" \
+    --scheme=path --tiebreak=length,index --prompt='folder> ' --print-query \
+    --preview="$preview" --preview-window='right,45%' \
+    "$@")
+  status=$?
+  [ "$status" = 0 ] || [ "$status" = 1 ] || exit "$status"
+  # line 1 is the query, then the key (with --expect), then the pick (if anything matched)
+  q=$(printf '%s\n' "$out" | sed -n 1p)
+  case " $* " in *" --expect="*) key=$(printf '%s\n' "$out" | sed -n 2p); d=$(printf '%s\n' "$out" | sed -n 3p) ;;
+    *) d=$(printf '%s\n' "$out" | sed -n 2p) ;;
+  esac
+  [ -n "$d" ] || d=$q
+  [ -n "$d" ] || exit 1
+fi
 case $d in "~"*) d="$HOME${d#"~"}" ;; esac
 d=${d%/}
 [ -z "$d" ] && d=/

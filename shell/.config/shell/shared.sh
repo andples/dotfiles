@@ -74,12 +74,17 @@ if [ -z "$OMARCHY_PATH" ]; then
     alias lt='eza --tree --level=2 --long --icons --git'
   fi
 
-  # Debian/Ubuntu name bat "batcat"
-  have bat || { have batcat && alias bat='batcat'; }
+  # Debian/Ubuntu name bat "batcat". ff's preview runs in a new shell, which doesn't see
+  # aliases, so it gets the real name (checked first: once aliased, `have bat` is true)
+  _bat=
+  if have batcat; then _bat=batcat; alias bat='batcat'; elif have bat; then _bat=bat; fi
 
   # fuzzy find a file with preview / open it in nvim
-  { have bat || have batcat; } && alias ff="fzf --preview 'bat --style=numbers --color=always {}'"
-  { have bat || have batcat; } && alias eff='nvim "$(ff)"'
+  if [ -n "$_bat" ]; then
+    alias ff="fzf --preview '$_bat --style=numbers --color=always {}'"
+    alias eff='nvim "$(ff)"'
+  fi
+  unset _bat
 
   alias g='git'
   alias gcm='git commit -m'

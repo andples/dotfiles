@@ -58,7 +58,7 @@ pkg_name() {
   case "$1:$2" in
     nvim:*)                  echo neovim ;;
     python3:brew|python3:pacman) echo python ;;
-    starship:apt|uv:apt|uv:zypper|typst:apt|typst:dnf) ;;
+    starship:apt|starship:dnf|uv:apt|uv:zypper|typst:apt|typst:dnf) ;;
     clipboard:*)             if [ -n "$WAYLAND_DISPLAY" ]; then echo wl-clipboard; else echo xclip; fi ;;
     *)                       echo "$1" ;;
   esac
@@ -115,7 +115,9 @@ check_deps() {
     if [ -n "$p" ]; then pkgs="$pkgs $p"; else unpackaged="$unpackaged $t"; fi
   done
 
-  if [ -n "$admin" ] && [ -n "$mgr" ]; then
+  if [ -n "$admin" ] && [ -n "$mgr" ] && [ -z "$pkgs" ]; then
+    echo "  not in $mgr:$unpackaged"
+  elif [ -n "$admin" ] && [ -n "$mgr" ]; then
     case $mgr in
       brew)   echo "  install: brew install$pkgs" ;;
       pacman) echo "  install: ${sudo}pacman -S --needed$pkgs" ;;
