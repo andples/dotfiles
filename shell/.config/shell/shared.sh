@@ -86,9 +86,6 @@ if [ -z "$OMARCHY_PATH" ]; then
   fi
   unset _bat
 
-  # look through a CSV: csv file.csv (/ search, & filter rows, q quit)
-  have csvlens && alias csv='csvlens'
-
   alias g='git'
   alias gcm='git commit -m'
   alias gcam='git commit -a -m'
@@ -125,6 +122,8 @@ fi
 
 # --- Aliases ---
 alias gsend='git add -A && git commit -m wip && git push'
+# look through a CSV: csv file.csv (/ search, & filter rows, q quit)
+have csvlens && alias csv='csvlens'
 
 # --- Functions ---
 
