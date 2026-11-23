@@ -7,6 +7,23 @@ HISTSIZE=50000
 SAVEHIST=50000
 setopt SHARE_HISTORY HIST_IGNORE_ALL_DUPS HIST_IGNORE_SPACE
 
+# --- Tab completion ---
+# Completes commands' own arguments: git branches, brew packages, `just` recipes from the
+# justfile here, ... Homebrew's completions are on zsh's path already (it's
+# /opt/homebrew/share/zsh/site-functions); the others are added if they exist.
+for _d in /usr/local/share/zsh/site-functions /usr/share/zsh/site-functions; do
+  [[ -d $_d && ${fpath[(Ie)$_d]} -eq 0 ]] && fpath=("$_d" $fpath)
+done
+unset _d
+autoload -Uz compinit
+# The full check (new completion files, insecure folders) takes ~20ms, so it runs once a day;
+# other shells reuse the cached ~/.zcompdump
+_dump=(~/.zcompdump(N.mh-24))
+if (( $#_dump )); then compinit -C; else compinit; fi
+unset _dump
+zstyle ':completion:*' menu select                 # Tab again to pick from the list with arrows
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}' # lower case matches upper case
+
 # Up/Down search history for commands starting with what you've typed
 autoload -U up-line-or-beginning-search down-line-or-beginning-search
 zle -N up-line-or-beginning-search

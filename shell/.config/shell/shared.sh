@@ -101,6 +101,11 @@ if [ -z "$OMARCHY_PATH" ]; then
   fi
 fi
 
+# just: Tab completes recipes from the justfile here (zsh loads it via compinit in .zshrc)
+if [ "$_sh" = bash ] && have just; then
+  eval "$(just --completions bash)"
+fi
+
 if have direnv; then
   eval "$(direnv hook $_sh)"
   export DIRENV_LOG_FORMAT=
