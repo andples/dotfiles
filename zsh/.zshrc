@@ -21,8 +21,20 @@ autoload -Uz compinit
 _dump=(~/.zcompdump(N.mh-24))
 if (( $#_dump )); then compinit -C; else compinit; fi
 unset _dump
+# just: Tab offers the justfile's recipes (with their # comments); its options only after `-`
+_just_recipes() {
+  if [[ $PREFIX == -* ]]; then _just "$@"; return; fi
+  local -a recipes
+  local line
+  for line in ${(f)"$(just --list --list-heading '' --list-prefix '' 2>/dev/null)"}; do
+    if [[ $line == *' # '* ]]; then recipes+=("${line%% *}:${line#* \# }"); else recipes+=("${line%% *}"); fi
+  done
+  if (( $#recipes )); then _describe -t recipes 'recipe' recipes; else _message 'no justfile here or in a parent folder'; fi
+}
+(( $+commands[just] )) && compdef _just_recipes just
 zstyle ':completion:*' menu select                 # Tab again to pick from the list with arrows
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}' # lower case matches upper case
+zstyle ':completion:*:messages' format '%F{yellow}%d%f'   # e.g. "no justfile here"
 
 # Up/Down search history for commands starting with what you've typed
 autoload -U up-line-or-beginning-search down-line-or-beginning-search
