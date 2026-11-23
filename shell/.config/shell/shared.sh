@@ -86,6 +86,9 @@ if [ -z "$OMARCHY_PATH" ]; then
   fi
   unset _bat
 
+  # look through a CSV: csv file.csv (/ search, & filter rows, q quit)
+  have csvlens && alias csv='csvlens'
+
   alias g='git'
   alias gcm='git commit -m'
   alias gcam='git commit -a -m'

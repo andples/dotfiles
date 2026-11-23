@@ -6,6 +6,7 @@
 
 # --- Shell (what the dotfiles use) ---
 brew "bat"
+brew "csvlens"
 brew "direnv"
 brew "eza"
 brew "fzf"
