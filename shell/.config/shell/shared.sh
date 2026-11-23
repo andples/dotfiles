@@ -101,9 +101,18 @@ if [ -z "$OMARCHY_PATH" ]; then
   fi
 fi
 
-# just: Tab completes recipes from the justfile here (zsh loads it via compinit in .zshrc)
+# just: Tab completes the justfile's recipes, and its options only after `-`
+# (zsh's version is in .zshrc)
 if [ "$_sh" = bash ] && have just; then
   eval "$(just --completions bash)"
+  _just_recipes() {
+    local cur=${COMP_WORDS[COMP_CWORD]}
+    case $cur in
+      -*) declare -F _clap_complete_just >/dev/null && _clap_complete_just "$@" ;;
+      *) COMPREPLY=($(compgen -W "$(just --summary 2>/dev/null)" -- "$cur")) ;;
+    esac
+  }
+  complete -o bashdefault -o nosort -F _just_recipes just
 fi
 
 if have direnv; then
