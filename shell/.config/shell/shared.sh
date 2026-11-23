@@ -168,6 +168,14 @@ cresume() {
   builtin cd -- "$cwd" && claude --resume "$id"
 }
 
+# macOS: full-screen apps stuck showing the menu bar after a display was plugged in or out.
+# macOS's MenuBarAgent misses the display change; restarting it (it relaunches at once) fixes
+# it without a reboot. Then leave and re-enter full screen. Details: the Dockless README.
+fixmenubar() {
+  [ "$(uname)" = Darwin ] || { echo "fixmenubar: macOS only" >&2; return 1; }
+  killall MenuBarAgent && echo "MenuBarAgent restarted: take the app out of full screen and back in"
+}
+
 # activate the venv in the current directory
 venv() {
   local d

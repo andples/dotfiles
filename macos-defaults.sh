@@ -6,6 +6,9 @@ set -e
 
 DRY=
 [ "${1-}" = -n ] && DRY=1
+# the apps to restart at the end, only for settings that actually changed (restarting the
+# Dock redraws every space, so it's only done when needed)
+RESTART=
 
 set_default() { # set_default DOMAIN KEY TYPE VALUE
   now=$(defaults read "$1" "$2" 2>/dev/null || echo '(unset)')
@@ -13,6 +16,13 @@ set_default() { # set_default DOMAIN KEY TYPE VALUE
   case $now in "~/"*) [ "$HOME/${now#"~/"}" = "$4" ] && return 0 ;; esac
   [ "$3" = -bool ] && case "$now:$4" in 1:true|0:false) return 0 ;; esac
   echo "  $1 $2: $now -> $4"
+  case $1 in
+    com.apple.dock) app=Dock ;;
+    com.apple.finder|com.apple.desktopservices) app=Finder ;;
+    com.apple.screencapture) app=SystemUIServer ;;
+    *) app= ;;
+  esac
+  case " $RESTART " in *" $app "*|"  ") ;; *) [ -n "$app" ] && RESTART="$RESTART $app" ;; esac
   [ -n "$DRY" ] || defaults write "$1" "$2" "$3" "$4"
 }
 
@@ -57,6 +67,7 @@ echo "Activity Monitor"
 set_default com.apple.ActivityMonitor ShowCategory -int 100 # all processes
 
 if [ -z "$DRY" ]; then
-  killall Finder Dock SystemUIServer 2>/dev/null || true
-  echo "done (log out and back in for the keyboard settings)"
+  # shellcheck disable=SC2086
+  if [ -n "$RESTART" ]; then killall $RESTART 2>/dev/null || true; fi
+  echo "done${RESTART:+ (restarted$RESTART)}; log out and back in for keyboard and window settings"
 fi
