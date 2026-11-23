@@ -400,7 +400,7 @@ fi
 # Every package, in the order they're listed and installed:
 #   name|where it works (any, macos, linux)|personal|label
 PACKAGES='shell|any||aliases and functions for bash and zsh
-bin|any||helper scripts: proj, ports, devtunnel, send, recentdl, claude-rc, ...
+bin|any||helper scripts: proj, ports, devtunnel, fixmenubar, send, recentdl, ...
 git|any||git settings, included from your own config
 starship|any||prompt with machine name and git status
 agents|any|personal|my instructions for Claude Code, Codex, opencode, pi
@@ -617,6 +617,11 @@ fi
 
 [ -d "$BACKUP" ] && echo "old files saved in $BACKUP"
 check_deps || true
+if [ "$(uname)" = Darwin ] && [ -x "$HOME/.local/bin/fixmenubar" ] &&
+  [ ! -f "$HOME/Library/LaunchAgents/dotfiles.fixmenubar.plist" ]; then
+  echo
+  echo "Optional: fix the menu bar getting stuck in full-screen apps automatically: fixmenubar install"
+fi
 if [ "$(uname)" = Darwin ] && is_owner && ! peek_installed; then
   echo
   echo "Optional: Peek, the Markdown viewer behind Zed's space p: ./install.sh peek"

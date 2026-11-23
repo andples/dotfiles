@@ -1,0 +1,130 @@
+#!/bin/sh
+# fixmenubar (macOS): unstick the menu bar in full-screen apps.
+#
+# When a display is plugged in or out, macOS's MenuBarAgent sometimes misses the change
+# (WindowServer logs "com.apple.menubaragent) did not respond") and from then on keeps the
+# menu bar showing in full-screen apps, until a reboot. Restarting MenuBarAgent fixes it;
+# macOS relaunches it at once. Seen on macOS 27; the full story is in the README.
+#
+#   fixmenubar            restart MenuBarAgent now (then leave and re-enter full screen)
+#   fixmenubar install    do it automatically: a login agent waits for that one log message
+#   fixmenubar uninstall  remove the agent
+#   fixmenubar status     is the agent running, and the last things it did
+#   fixmenubar log        follow its log (~/Library/Logs/fixmenubar.log)
+#   fixmenubar watch      what the agent runs (waits on `log stream`, uses no CPU otherwise)
+set -u
+
+LABEL=dotfiles.fixmenubar
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG=${FIXMENUBAR_LOG:-$HOME/Library/Logs/fixmenubar.log}
+# the exact message: "  - Connection 373139 (PID 630, com.apple.menubaragent) did not respond"
+MATCH='com.apple.menubaragent) did not respond'
+
+[ "$(uname)" = Darwin ] || { echo "fixmenubar: macOS only" >&2; exit 1; }
+
+note() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+agent_pid() { pgrep -x MenuBarAgent | head -n 1; }
+
+restart() { # restart WHY
+  old=$(agent_pid)
+  if [ -n "${FIXMENUBAR_DRY:-}" ]; then
+    note "$1: would restart MenuBarAgent (pid ${old:-none}) [dry run]"
+    return 0
+  fi
+  killall MenuBarAgent 2>/dev/null
+  i=0
+  new=
+  while [ $i -lt 10 ]; do # macOS relaunches it within a second or two
+    sleep 1
+    new=$(agent_pid)
+    [ -n "$new" ] && [ "$new" != "$old" ] && break
+    i=$((i + 1))
+  done
+  if [ -n "$new" ] && [ "$new" != "$old" ]; then
+    note "$1: restarted MenuBarAgent (pid ${old:-none} -> $new)"
+  else
+    note "$1: PROBLEM: MenuBarAgent didn't come back as a new process (was ${old:-none}, now ${new:-none})"
+    return 1
+  fi
+}
+
+# Reads `log stream` lines; restarts MenuBarAgent for each miss, at most once every 30 s
+# (one display change can log it more than once).
+handle() {
+  last=0
+  while IFS= read -r line; do
+    # only WindowServer's own messages (log stream's "Filtering ..." header repeats the text)
+    case $line in *"WindowServer["*"$MATCH"*) ;; *) continue ;; esac
+    now=$(date +%s)
+    note "seen: $line"
+    if [ $((now - last)) -lt 30 ]; then
+      note "  restarted it $((now - last))s ago, skipping"
+      continue
+    fi
+    last=$now
+    sleep 2 # let the display change finish first
+    restart "display change missed" || true
+  done
+}
+
+case ${1:-now} in
+  now)
+    mkdir -p "$(dirname "$LOG")"
+    restart "by hand" && echo "MenuBarAgent restarted: take the app out of full screen and back in" ;;
+  watch)
+    mkdir -p "$(dirname "$LOG")"
+    note "watching for MenuBarAgent missing a display change (pid $$)"
+    /usr/bin/log stream --style compact --predicate \
+      "process == \"WindowServer\" AND eventMessage CONTAINS \"$MATCH\"" | handle
+    note "log stream ended (status $?), launchd will start the watch again" ;;
+  handle) handle ;; # for testing: feed it lines on stdin (with FIXMENUBAR_DRY=1)
+  install)
+    self=$HOME/.local/bin/fixmenubar
+    [ -x "$self" ] || self=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+    tmp="$PLIST.tmp.$$"
+    cat > "$tmp" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>$self</string><string>watch</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+EOF
+    domain=gui/$(id -u)
+    if cmp -s "$tmp" "$PLIST" && launchctl print "$domain/$LABEL" >/dev/null 2>&1; then
+      rm -f "$tmp"
+      echo "fixmenubar: already installed and running"
+      exit 0
+    fi
+    mv "$tmp" "$PLIST"
+    launchctl bootout "$domain/$LABEL" 2>/dev/null
+    launchctl bootstrap "$domain" "$PLIST" || { echo "fixmenubar: launchctl bootstrap failed" >&2; exit 1; }
+    echo "fixmenubar: installed; it starts at login and fixes the menu bar after display changes"
+    echo "  log: $LOG" ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    rm -f "$PLIST"
+    echo "fixmenubar: uninstalled" ;;
+  status)
+    if launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -q 'state = running'; then
+      echo "agent: running"
+    elif [ -f "$PLIST" ]; then
+      echo "agent: installed but NOT running (see the log)"
+    else
+      echo "agent: not installed (fixmenubar install)"
+    fi
+    echo "MenuBarAgent pid: $(agent_pid)"
+    [ -f "$LOG" ] && { echo; tail -n 8 "$LOG"; } ;;
+  log) touch "$LOG"; exec tail -n 30 -f "$LOG" ;;
+  -h|--help|help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "fixmenubar: unknown command $1 (try fixmenubar help)" >&2; exit 2 ;;
+esac

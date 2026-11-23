@@ -246,6 +246,24 @@ command and folder on the server (`server:~/project`). `ports 5173` shows just o
 skips asking each server for its title. To free a port: `port 5173` shows what's listening,
 `killport 5173` stops it (local servers only).
 
+## Menu bar stuck in full-screen apps (macOS)
+
+Sometimes, after a display is plugged in or out, full-screen apps keep the menu bar and the
+window's title bar showing at the top until a reboot. macOS's MenuBarAgent misses the display
+change (WindowServer logs `com.apple.menubaragent) did not respond`) and keeps the menu bar marked
+as visible. Restarting MenuBarAgent fixes it; macOS relaunches it at once.
+
+- `fixmenubar` restarts it now; then take the app out of full screen and back in.
+- `fixmenubar install` does it automatically: a login agent waits for that one log message
+  (doing nothing otherwise) and restarts MenuBarAgent when it appears.
+- `fixmenubar status` shows whether the agent is running and what it last did; everything it
+  sees and does goes to `~/Library/Logs/fixmenubar.log`. `fixmenubar uninstall` removes it.
+
+If the bar gets stuck and the log shows nothing new, something other than a display change
+caused it: run `fixmenubar` by hand, and look in `log show --last 1h --predicate 'process ==
+"MenuBarAgent"'` for what happened. Others have reported the same thing on macOS 27:
+[dimble #166](https://github.com/fif7y/dimble/issues/166) (fixed by restarting MenuBarAgent).
+
 ## Your own settings and secrets
 
 Keep anything personal or machine-specific outside the repo. `shared.sh` loads these last,
