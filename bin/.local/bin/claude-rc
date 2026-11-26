@@ -12,10 +12,16 @@
 #   claude-rc add NAME [DIR] --resume ID  ... or continue an existing one (by its local id)
 #   claude-rc rm NAME             stop it and forget it
 #   claude-rc save                write the list from the windows running now
+#   claude-rc install             keep it all running: start at boot, restart what crashes
+#                                 (systemd user timer, or a launchd agent on macOS)
+#   claude-rc uninstall           stop doing that
+#   claude-rc log                 what the background runs did
+#   claude-rc watch               one background run: `up`, then `restart` (what install runs)
 #
-# Servers: sessions you start from the app run inside the server and end with it; a new
-# server doesn't take them back. To keep one, continue it as its own window:
-# `claude-rc add NAME DIR --resume ID`.
+# Servers: sessions you start from the app run inside the server. A server restarted in the
+# same folder rejoins the same Remote Control environment, so those sessions come back too:
+# each one restarts the next time it gets a message. A restart right after a crash can
+# fail with "already served" for a minute; the next background run tries again.
 #
 # Conversations: a restart resumes the one the window is on now, even after /clear or
 # /resume (from `claude agents --json`), and checks it came back; if the first restart
@@ -190,9 +196,12 @@ cmd_for() {
   esac
 }
 
+logged_in() { claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; }
 need_login() {
   have claude || die "claude isn't installed"
-  if [ -z "$1" ] && claude auth status 2>/dev/null | grep -q '"loggedIn": *true'; then return; fi
+  if [ -z "$1" ] && logged_in; then return; fi
+  # in the background there's no one to log in: wait for `claude-rc restart --login`
+  [ -n "$watching" ] && die "not logged in to Claude: run claude-rc restart --login"
   [ -n "$1" ] || echo "Not logged in to Claude."
   echo "Running 'claude auth login'..."
   claude auth login || die "login failed"
@@ -224,6 +233,11 @@ asking() { t capture-pane -p -t "$(target "$1")" | grep -qE '\[y/N\]|Choose \[';
 start() { # name cmd dir
   if has_session; then
     t new-window -d -t "=$session:" -n "$1" -c "$3" "$2"
+  elif [ -n "$INVOCATION_ID" ] && have systemd-run && ! t list-sessions >/dev/null 2>&1; then
+    # Under systemd, a tmux server started here would be in the service's cgroup and
+    # killed when the run ends: start it in a scope of its own
+    systemd-run --user --scope --quiet --collect --unit "claude-rc-tmux-$$" \
+      tmux $CLAUDE_RC_TMUX new-session -d -s "$session" -n "$1" -c "$3" "$2"
   else
     t new-session -d -s "$session" -n "$1" -c "$3" "$2"
   fi
@@ -356,6 +370,10 @@ print(json.dumps(out, indent=2))'
         printf "%s", other
       }
     }'
+  if [ -n "$(entries)" ] && ! installed; then
+    echo
+    echo "Not brought back after a crash or reboot: claude-rc install"
+  fi
 }
 
 cmd_up() {
@@ -395,7 +413,10 @@ cmd_restart() {
       esac
     done
   fi
-  [ -n "$names" ] || { echo "Everything is running, nothing to restart."; return; }
+  if [ -z "$names" ]; then
+    [ -n "$watching" ] || echo "Everything is running, nothing to restart."
+    return
+  fi
   need_login "$login"
   load_live # read every window's conversation before any of them restarts
   for n in $names; do
@@ -483,7 +504,177 @@ cmd_save() {
   [ -z "$skipped" ] || echo "Skipped (no id found, or a name with other than letters, digits, _ -):$skipped"
 }
 
-case ${1:-ls} in ls|up|restart|add|rm|save) check_list ;; esac
+# --- in the background ----------------------------------------------------------------------
+
+unit_dir=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+agent_label=dotfiles.claude-rc
+agent=$HOME/Library/LaunchAgents/$agent_label.plist
+mac_log=$HOME/Library/Logs/claude-rc.log
+lock=${TMPDIR:-/tmp}/claude-rc-$(id -u)-$session.lock
+
+installed() {
+  if [ "$(uname)" = Darwin ]; then [ -f "$agent" ]; else [ -f "$unit_dir/claude-rc.timer" ]; fi
+}
+
+# One background run: start what's missing, restart what exited. Never asks anything, and
+# runs one at a time (a run can take a while: each restart waits for claude to come back).
+cmd_watch() {
+  watching=1
+  [ -f "$list" ] || return 0
+  # a lock left by a run that was killed is stale after 10 minutes
+  [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$lock" 2>/dev/null
+  mkdir "$lock" 2>/dev/null || return 0
+  trap 'rmdir "$lock" 2>/dev/null' EXIT
+  have claude || die "claude isn't on PATH ($PATH): run claude-rc install again from a shell where it is"
+  logged_in || die "not logged in to Claude: run claude-rc restart --login"
+  cmd_up
+  cmd_restart
+}
+
+# Where this script lives, for the unit to run (the ~/.local/bin link if that's us)
+self() {
+  if [ "$HOME/.local/bin/claude-rc" -ef "$0" ]; then echo "$HOME/.local/bin/claude-rc"
+  else echo "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  fi
+}
+
+# Settings the background runs need from this shell, as NAME=value lines: PATH (to find
+# claude, tmux and python3), the shell and locale for the windows, and claude-rc's own
+env_lines() {
+  local v
+  for v in PATH SHELL LANG LC_ALL XDG_CONFIG_HOME CLAUDE_RC_SESSION CLAUDE_RC_FLAGS \
+    CLAUDE_RC_SERVER_FLAGS CLAUDE_RC_TMUX; do
+    [ -n "${!v}" ] && printf '%s=%s\n' "$v" "${!v}"
+  done
+}
+
+write_if_changed() { # file; content on stdin. Fails if the file was already up to date.
+  local tmp="$1.$$"
+  cat >"$tmp"
+  if cmp -s "$tmp" "$1"; then rm -f "$tmp"; return 1; fi
+  mv "$tmp" "$1"
+}
+
+install_systemd() {
+  have systemctl && systemctl --user show-environment >/dev/null 2>&1 ||
+    die "no systemd user session here: run 'claude-rc watch' from cron every minute instead"
+  mkdir -p "$unit_dir"
+  local exe changed=
+  exe=$(self)
+  {
+    echo "# Written by claude-rc install. Logs: claude-rc log"
+    echo "[Unit]"
+    echo "Description=Keep Claude Remote Control running (claude-rc watch)"
+    echo
+    echo "[Service]"
+    echo "Type=oneshot"
+    echo "ExecStart=\"$exe\" watch"
+    # systemd expands % and needs quotes and backslashes escaped
+    env_lines | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g; s/.*/Environment="&"/'
+  } | write_if_changed "$unit_dir/claude-rc.service" && changed=1
+  cat <<'EOF' | write_if_changed "$unit_dir/claude-rc.timer" && changed=1
+# Written by claude-rc install
+[Unit]
+Description=Check Claude Remote Control every minute, from boot
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable -q --now claude-rc.timer || die "couldn't enable claude-rc.timer"
+  [ -n "$changed" ] && systemctl --user start --no-block claude-rc.service
+  echo "systemd: claude-rc.timer checks every minute, starting at boot"
+
+  # Without lingering, user services only run while you're logged in
+  if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)" != yes ]; then
+    if loginctl enable-linger 2>/dev/null; then
+      echo "lingering on: it starts at boot, before anyone logs in"
+    else
+      echo "To start at boot before anyone logs in, run: sudo loginctl enable-linger $(id -un)"
+    fi
+  fi
+}
+
+install_launchd() {
+  local exe xml='s/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+  exe=$(self)
+  mkdir -p "$(dirname "$agent")" "$(dirname "$mac_log")"
+  {
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$agent_label</string>
+  <key>ProgramArguments</key>
+  <array><string>$(printf '%s' "$exe" | sed "$xml")</string><string>watch</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+EOF
+    env_lines | sed "$xml" | sed 's#^\([^=]*\)=\(.*\)$#    <key>\1</key><string>\2</string>#'
+    cat <<EOF
+  </dict>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+  <key>AbandonProcessGroup</key><true/>
+  <key>StandardOutPath</key><string>$mac_log</string>
+  <key>StandardErrorPath</key><string>$mac_log</string>
+</dict>
+</plist>
+EOF
+  } | write_if_changed "$agent"
+  launchctl bootout "gui/$(id -u)/$agent_label" 2>/dev/null
+  launchctl bootstrap "gui/$(id -u)" "$agent" || die "couldn't load $agent"
+  echo "launchd: checks every minute while you're logged in (macOS runs agents after login)"
+}
+
+cmd_install() {
+  have claude || die "claude isn't on PATH: install Claude Code first"
+  if [ "$(uname)" = Darwin ]; then install_launchd; else install_systemd; fi
+  echo "Settings come from this shell (PATH, SHELL, CLAUDE_RC_*): after changing them, run it again."
+  # Nothing to keep running yet: offer to serve a folder
+  if [ -z "$(entries)" ] && [ -t 0 ] && [ -t 1 ]; then
+    local dir name
+    echo
+    printf 'Folder to serve with Remote Control (enter: %s, n: none for now): ' "$PWD"
+    read -r dir || return 0
+    case $dir in n|N) echo "Later: claude-rc add NAME DIR --server"; return 0 ;; esac
+    dir=${dir:-$PWD}
+    case $dir in "~"|"~/"*) dir=$HOME${dir#\~} ;; esac
+    name=$(basename "$dir" | tr -c 'A-Za-z0-9\n_-' '-')
+    cmd_add "$name" "$dir" --server
+  elif [ -z "$(entries)" ]; then
+    echo "Nothing in the list yet: claude-rc add NAME DIR --server"
+  fi
+}
+
+cmd_uninstall() {
+  if [ "$(uname)" = Darwin ]; then
+    launchctl bootout "gui/$(id -u)/$agent_label" 2>/dev/null
+    rm -f "$agent"
+  else
+    systemctl --user disable -q --now claude-rc.timer 2>/dev/null
+    rm -f "$unit_dir/claude-rc.service" "$unit_dir/claude-rc.timer"
+    systemctl --user daemon-reload 2>/dev/null
+  fi
+  echo "Not kept running anymore. What's running now keeps running; the list is kept."
+}
+
+cmd_log() {
+  if [ "$(uname)" = Darwin ]; then
+    [ -f "$mac_log" ] || { echo "no log yet ($mac_log)"; return; }
+    tail -n 50 "$@" "$mac_log"
+  else
+    journalctl --user -u claude-rc.service -n 50 --no-pager "$@"
+  fi
+}
+
+case ${1:-ls} in ls|up|restart|add|rm|save|watch) check_list ;; esac
 case ${1:-ls} in
   ls) shift; cmd_ls "$@" ;;
   up) cmd_up ;;
@@ -491,6 +682,10 @@ case ${1:-ls} in
   add) shift; cmd_add "$@" ;;
   rm) shift; cmd_rm "$@" ;;
   save) cmd_save ;;
+  watch) cmd_watch ;;
+  install) cmd_install ;;
+  uninstall) cmd_uninstall ;;
+  log) shift; cmd_log "$@" ;;
   -h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command '$1' (see claude-rc --help)" ;;
 esac

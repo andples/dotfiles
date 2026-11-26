@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Stand-in for Claude Code in the claude-rc Docker test. Only what claude-rc uses:
+# auth status, agents --json, remote-control (a server), --session-id/--resume (a conversation).
+# Like the real thing after an unclean kill, a folder stays "already served" for a while.
+state=$HOME/.fake-claude
+mkdir -p "$state/agents" "$state/served"
+heartbeat() { # file: keep it fresh while we run
+  while :; do echo $$ >"$1"; sleep 5; done
+}
+case $1 in
+  auth) [ -e "$state/logged-out" ] && echo '{"loggedIn": false}' || echo '{"loggedIn": true}' ;;
+  agents)
+    printf '['; sep=
+    for f in "$state"/agents/*; do
+      [ -f "$f" ] || continue
+      pid=${f##*/}
+      if kill -0 "$pid" 2>/dev/null; then
+        printf '%s{"pid": %s, "sessionId": "%s"}' "$sep" "$pid" "$(cat "$f")"; sep=,
+      else rm -f "$f"
+      fi
+    done
+    echo ']' ;;
+  remote-control)
+    key=$(pwd | cksum | cut -d' ' -f1)
+    f=$state/served/$key
+    # (GNU stat: this only runs in the Linux test container)
+    if [ -f "$f" ] && [ $(($(date +%s) - $(stat -c %Y "$f"))) -lt 30 ]; then
+      echo "Error: This folder is already served by a terminal \`claude remote-control\` on this device. Stop it first."
+      exit 1
+    fi
+    echo "Capacity: 0/32 · fake server in $(pwd)"
+    heartbeat "$f" ;;
+  --session-id|--resume)
+    echo "$2" >"$state/agents/$$"
+    echo "fake conversation $2"
+    while :; do sleep 5; done ;;
+  *) echo "fake claude: unsupported: $*" >&2; exit 2 ;;
+esac

@@ -388,6 +388,33 @@ setup_karabiner() {
   fi
 }
 
+# claude-rc: link just that script from bin (so it works without the rest of bin), then let
+# it set up the background service (systemd timer / launchd agent) itself
+setup_claude_rc() {
+  src="$DOTFILES/bin/.local/bin/claude-rc"
+  dest="$HOME/.local/bin/claude-rc"
+  echo "claude-rc"
+  if ! { [ -L "$dest" ] && [ "$(readlink "$dest")" = "$src" ]; }; then
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+      echo "  backing up ~/.local/bin/claude-rc"
+      run mkdir -p "$BACKUP/.local/bin"
+      run mv "$dest" "$BACKUP/.local/bin/claude-rc"
+    fi
+    echo "  ~/.local/bin/claude-rc"
+    run mkdir -p "$HOME/.local/bin"
+    run ln -s "$src" "$dest"
+  fi
+  if ! have tmux || ! have claude; then
+    echo "  not started: needs tmux and Claude Code (claude) on PATH, then ./install.sh claude-rc"
+    return 0
+  fi
+  if [ -n "$DRY" ]; then
+    echo "  would: claude-rc install"
+  else
+    "$dest" install || echo "  claude-rc install failed: run it again to see why"
+  fi
+}
+
 peek_installed() {
   [ -d /Applications/Peek.app ] || [ -d "$HOME/Applications/Peek.app" ]
 }
@@ -411,6 +438,7 @@ zed|any||Zed settings, keys and tasks
 direnv|any||direnv layout uv: activates the .venv in folders set up by uve
 ghostty|macos||Ghostty terminal settings, included from your own config
 karabiner|macos||Karabiner-Elements key remaps (Right Shift bracket layer, no Escape key)
+claude-rc|any||keep Claude Remote Control servers running, back after crashes and reboots
 notes|any||~/notes: Typst notes in your own repo (<you>/notes on GitHub), synced every 2 minutes
 peek|macos|personal|Peek Markdown viewer app (private repo, builds from source)'
 
@@ -457,6 +485,7 @@ picker_defaults() {
   d=$(default_packages)
   if is_owner; then
     d="$d notes"
+    [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/claude-rc/sessions" ] && d="$d claude-rc"
     if [ "$(uname)" = Darwin ] && ! peek_installed; then d="$d peek"; fi
   fi
   echo "$d"
@@ -529,6 +558,10 @@ for pkg in "$@"; do
   fi
   if [ "$pkg" = peek ]; then
     install_peek
+    continue
+  fi
+  if [ "$pkg" = claude-rc ]; then
+    setup_claude_rc
     continue
   fi
   if [ ! -d "$DOTFILES/$pkg" ]; then

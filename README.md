@@ -106,6 +106,7 @@ itself, and a missing tool never makes it fail.
 | `direnv` | `~/.config/direnv/direnvrc`: `layout uv` for the `.envrc` that `uve` writes | where direnv is installed |
 | `ghostty` | `~/.config/ghostty/dotfiles.conf`, included from your own `~/.config/ghostty/config` | macOS, where Ghostty is installed |
 | `karabiner` | Karabiner-Elements key remaps: hold Right Shift for brackets, Escape key off, Command/Option swapped on one external keyboard (see [Karabiner](#karabiner)) | macOS, where Karabiner is installed |
+| `claude-rc` | `claude-rc` in `~/.local/bin`, plus a background check every minute and at boot (systemd timer, or a launchd agent on macOS) that keeps Remote Control servers running (see below) | when picked |
 | `notes` | `notes` and `notes-sync` in `~/.local/bin`, Typst templates, a 2-minute sync timer (see [Notes](#notes)) | when picked |
 | `peek` | builds the Peek app (see [Peek](#peek)) | personal, macOS, when picked |
 
@@ -286,11 +287,23 @@ remote folder. Give the machine a nickname in `~/.ssh/config` and set
 
 `claude-rc` keeps Claude Remote Control running in a tmux session called `rc`: servers
 (`claude-rc add NAME DIR --server`, which you start sessions on from the app) and single
-conversations (`claude-rc add NAME DIR`, or `--resume ID` to continue one). After a reauth,
-`claude-rc restart --login` restarts whatever exited, resuming conversations where they
-were; `claude-rc up` does the same after a reboot. Sessions inside a server end with it, so
-keep anything long-lived as its own conversation. `claude-rc ls --json` lists everything for
-scripts and dashboards. The list lives in `~/.config/claude-rc/`, outside the repo. See
+conversations (`claude-rc add NAME DIR`, or `--resume ID` to continue one).
+
+To have that happen on its own, so a crash or reboot needs nobody to SSH in:
+
+```sh
+git clone https://github.com/andples/dotfiles && cd dotfiles && ./install.sh claude-rc
+```
+
+That links `claude-rc`, runs `claude-rc install` (a check every minute and at boot; on
+Linux it also turns on lingering, so it starts before anyone logs in), and asks for a folder
+to serve. Each check starts what's missing and restarts what exited. A restarted server
+rejoins the same Remote Control environment, so the sessions you started from the app come
+back too, each the next time it gets a message. Right after a crash the folder can count as
+"already served" for a minute; the next check tries again. If Claude gets logged out, the
+checks wait for `claude-rc restart --login`. `claude-rc log` shows what they did,
+`claude-rc uninstall` stops them, `claude-rc ls --json` lists everything for scripts and
+dashboards. The list lives in `~/.config/claude-rc/`, outside the repo. See
 `claude-rc --help`.
 
 `cresume` resumes any Claude Code session, whatever folder you're in: it lists every
