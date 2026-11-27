@@ -409,7 +409,8 @@ cmd_restart() {
       case $s in
         exited) names="$names $n" ;;
         missing) is_server_entry "$n" && names="$names $n" ;;
-        disconnected) echo "$n: disconnected but still running, left alone (run /remote-control in it)" ;;
+        disconnected) [ -n "$watching" ] ||
+          echo "$n: disconnected but still running, left alone (run /remote-control in it)" ;;
       esac
     done
   fi
@@ -541,8 +542,14 @@ self() {
 # Settings the background runs need from this shell, as NAME=value lines: PATH (to find
 # claude, tmux and python3), the shell and locale for the windows, and claude-rc's own
 env_lines() {
-  local v
-  for v in PATH SHELL LANG LC_ALL XDG_CONFIG_HOME CLAUDE_RC_SESSION CLAUDE_RC_FLAGS \
+  local v real
+  # A claude on PATH can be a wrapper that only works in an activated shell (Omarchy's runs
+  # `mise x claude -- claude`, which loops forever under systemd): put the real one first
+  real=$(have mise && mise which claude 2>/dev/null)
+  if [ -x "$real" ]; then echo "PATH=$(dirname "$real"):$PATH"
+  else echo "PATH=$PATH"
+  fi
+  for v in SHELL LANG LC_ALL XDG_CONFIG_HOME CLAUDE_RC_SESSION CLAUDE_RC_FLAGS \
     CLAUDE_RC_SERVER_FLAGS CLAUDE_RC_TMUX; do
     [ -n "${!v}" ] && printf '%s=%s\n' "$v" "${!v}"
   done
@@ -568,6 +575,7 @@ install_systemd() {
     echo
     echo "[Service]"
     echo "Type=oneshot"
+    echo "TimeoutStartSec=10min"
     echo "ExecStart=\"$exe\" watch"
     # systemd expands % and needs quotes and backslashes escaped
     env_lines | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g; s/.*/Environment="&"/'
