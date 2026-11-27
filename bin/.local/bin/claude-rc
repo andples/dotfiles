@@ -393,6 +393,13 @@ $(entries)
 EOF
 }
 
+# Failed background restarts in a row, per name
+fails_dir=$(dirname "$list")/failing
+fails() { cat "$fails_dir/$1" 2>/dev/null || echo 0; }
+set_fails() {
+  if [ "$2" = 0 ]; then rm -f "$fails_dir/$1"; else mkdir -p "$fails_dir" && echo "$2" >"$fails_dir/$1"; fi
+}
+
 cmd_restart() {
   local login= names= n s first=1 failed=
   for n in "$@"; do
@@ -421,6 +428,19 @@ cmd_restart() {
   need_login "$login"
   load_live # read every window's conversation before any of them restarts
   for n in $names; do
+    if [ -n "$watching" ]; then
+      # in the background: one that can't come back mustn't hold up the rest, and after
+      # 3 failures in a row it's left alone until you restart it yourself
+      [ "$(fails "$n")" -ge 3 ] && continue
+      if restart "$n"; then set_fails "$n" 0
+      else
+        set_fails "$n" $(($(fails "$n") + 1))
+        [ "$(fails "$n")" -ge 3 ] &&
+          echo "$n: gave up after 3 failed restarts in a row (claude-rc restart $n to try again)"
+      fi
+      continue
+    fi
+    set_fails "$n" 0
     if ! restart "$n"; then
       failed="$failed $n"
       if [ -n "$first" ]; then
@@ -482,6 +502,7 @@ cmd_rm() {
     awk -v n="$1" '/^[[:space:]]*#/ || $1 != n' "$list" >"$list.$$" && mv "$list.$$" "$list"
   fi
   has_window "$1" && t kill-window -t "$(target "$1")"
+  set_fails "$1" 0
   if [ "$id" = server ]; then echo "removed server $1"
   else echo "removed $1${id:+ (conversation $id)}"
   fi
