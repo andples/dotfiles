@@ -5,9 +5,12 @@
 #   tests/claude-rc/run.sh          build, run, clean up
 #   KEEP=1 tests/claude-rc/run.sh   leave the container running to poke at
 #
-# Never run it with --privileged: systemd in the container then hangs up the host's console,
-# which logs out a desktop on tty1. Unprivileged Docker mounts the cgroup read-only, so
-# systemd can't boot yet: this needs a rootless runner (podman) or a VM to work.
+#   PRIVILEGED=1 tests/claude-rc/run.sh   the only way it runs under Docker (see below)
+#
+# Unprivileged Docker mounts the cgroup read-only, so systemd can't boot. --privileged
+# works but hands the container the host's devices: without the console units masked in
+# the Dockerfile, systemd in it hung up the host's tty1 and logged out the desktop there.
+# With them masked, a privileged run on 2026-11-27 left the desktop alone.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -20,8 +23,13 @@ docker rm -f "$name" >/dev/null 2>&1
 # Not --privileged: that would hand the container the host's devices, and systemd in it
 # would then hang up the host's console (logging out a desktop on tty1). Its own cgroup
 # namespace and tmpfs /run are all systemd needs here.
-docker run -d --name "$name" --cgroupns=private --tmpfs /run --tmpfs /run/lock \
-  --tmpfs /tmp "$img" >/dev/null || exit 1
+if [ -n "${PRIVILEGED:-}" ]; then
+  docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+    --tmpfs /run --tmpfs /run/lock --tmpfs /tmp "$img" >/dev/null || exit 1
+else
+  docker run -d --name "$name" --cgroupns=private --tmpfs /run --tmpfs /run/lock \
+    --tmpfs /tmp "$img" >/dev/null || exit 1
+fi
 [ -n "${KEEP:-}" ] || trap 'docker rm -f "$name" >/dev/null' EXIT
 
 as_u() { docker exec -u u -w /home/u -e XDG_RUNTIME_DIR=/run/user/1000 \
@@ -68,6 +76,16 @@ as_u "$(running srv)" >/dev/null && bad "restarted while logged out" || ok "left
 as_u 'claude-rc log' | grep -q 'not logged in' && ok "log says to log in" || bad "log doesn't say why"
 as_u 'rm ~/.fake-claude/logged-out'
 wait_for 90 "back once logged in" "$(running srv)"
+
+echo "an entry that can't come back doesn't hold up the rest"
+# listed first, so it's tried first; fake claude can't resume this id
+as_u 'mkdir -p ~/.fake-claude && echo 00000000-0000-4000-8000-000000000000 > ~/.fake-claude/unresumable
+  f=~/.config/claude-rc/sessions; { head -n 1 $f; echo "broken 00000000-0000-4000-8000-000000000000 /home/u/proj"; tail -n +2 $f; } > $f.new && mv $f.new $f'
+as_u "kill -9 \$($(pid_of remote-control))"
+wait_for 100 "server back despite the broken entry" "$(running srv)"
+wait_for 300 "gave up on the broken entry" "test \$(cat ~/.config/claude-rc/failing/broken 2>/dev/null || echo 0) -ge 3"
+as_u 'claude-rc log' | grep -q 'broken: gave up' && ok "log says it gave up" || bad "no give-up line in the log"
+as_u 'claude-rc rm broken >/dev/null'
 
 echo "reboot"
 docker restart "$name" >/dev/null

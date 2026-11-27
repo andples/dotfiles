@@ -31,6 +31,9 @@ case $1 in
     echo "Capacity: 0/32 · fake server in $(pwd)"
     heartbeat "$f" ;;
   --session-id|--resume)
+    if [ "$1" = --resume ] && grep -qx "$2" "$state/unresumable" 2>/dev/null; then
+      echo "No conversation found with session ID: $2"; exit 1
+    fi
     echo "$2" >"$state/agents/$$"
     echo "fake conversation $2"
     while :; do sleep 5; done ;;
